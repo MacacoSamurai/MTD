@@ -1,3 +1,3 @@
-from . import hud, menus, board
+from . import hud, menus, board, map_menu
 
-__all__ = ["hud", "menus", "board"]
+__all__ = ["hud", "menus", "board", "map_menu"]

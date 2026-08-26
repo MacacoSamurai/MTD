@@ -8,7 +8,8 @@ from ..entities.enemy import Enemy
 
 
 class WaveManager:
-    def __init__(self):
+    def __init__(self, map_path):
+        self.map_path = map_path
         self.wave_num = 0
         self.spawn_queue = []  # lista de kinds a spawnar
         self.spawn_timer = 0.0
@@ -18,7 +19,8 @@ class WaveManager:
         self.auto_start_delay = 6.0
 
     def hp_mult(self):
-        return 1.0 + (self.wave_num - 1) * 0.18
+        base = 1.0 + (self.wave_num - 1) * 0.18
+        return base * self.map_path.hp_mult
 
     def speed_mult(self):
         return min(2.2, 1.0 + (self.wave_num - 1) * 0.015)
@@ -96,7 +98,7 @@ class WaveManager:
                 self.spawn_timer -= dt
                 if self.spawn_timer <= 0:
                     kind = self.spawn_queue.pop(0)
-                    e = Enemy(kind, self.wave_num, self.hp_mult(), self.speed_mult())
+                    e = Enemy(kind, self.wave_num, self.hp_mult(), self.speed_mult(), self.map_path)
                     enemies_list.append(e)
                     self.spawn_timer = self.spawn_interval
             else:

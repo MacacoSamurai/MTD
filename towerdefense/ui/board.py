@@ -6,12 +6,11 @@ from ..config import (
     GRID_ROWS, GRID_COLS, GRID_ORIGIN_X, GRID_ORIGIN_Y, CELL_SIZE,
     COL_PATH, COL_PATH_EDGE, COL_GRID_EMPTY, COL_GRID_EMPTY_HOVER, COL_GRID_BORDER,
 )
-from ..paths import PATH_POINTS, PATH_CELL_SET
 
 
-def draw_path(surf, offset):
+def draw_path(surf, offset, map_path):
     ox, oy = offset
-    pts = [(x + ox, y + oy) for x, y in PATH_POINTS]
+    pts = [(x + ox, y + oy) for x, y in map_path.points]
     pygame.draw.lines(surf, COL_PATH_EDGE, False, pts, 46)
     pygame.draw.lines(surf, COL_PATH, False, pts, 38)
     # marcas tracejadas
@@ -39,7 +38,7 @@ def draw_grid(game, surf):
     for row in range(GRID_ROWS):
         for col in range(GRID_COLS):
             cell = (col, row)
-            if cell in PATH_CELL_SET:
+            if cell in game.map_path.cell_set:
                 continue  # caminho e desenhado separadamente, nao e slot
             x = GRID_ORIGIN_X + col * CELL_SIZE
             y = GRID_ORIGIN_Y + row * CELL_SIZE

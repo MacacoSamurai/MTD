@@ -14,11 +14,12 @@ from .config import (
     GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_COLS, GRID_ROWS, CELL_SIZE,
     CLICK_DRAG_THRESHOLD, COL_GOLD, COL_GEM, TOP_HUD_HEIGHT,
 )
-from .paths import PATH_CELL_SET
+from .paths import MapPath
+from .maps import DEFAULT_MAP_ID
 from .entities import Tower
 from .systems import WaveManager, MetaUpgrades
 from .fonts import get_font
-from .ui import hud, menus, board
+from .ui import hud, menus, board, map_menu
 
 
 class Game:
@@ -35,7 +36,21 @@ class Game:
         self.total_bosses_killed = 0
         self.meta_shop_open = False
         self.gem_button_rect = None
+        self.mouse_pos = (0, 0)
+        # estado geral do jogo: comeca no menu de selecao de mapa.
+        # "map_select" -> escolhendo mapa | "playing" -> partida em curso
+        self.state = "map_select"
+        self.selected_map_id = DEFAULT_MAP_ID
+        self.map_path = MapPath(self.selected_map_id)
         self.reset()
+
+    def start_map(self, map_id):
+        """Chamado ao clicar num card do menu de mapas: define o mapa
+        escolhido, (re)constroi o caminho e comeca a partida."""
+        self.selected_map_id = map_id
+        self.map_path = MapPath(map_id)
+        self.reset()
+        self.state = "playing"
 
     def reset(self):
         self.gold = STARTING_GOLD + self.meta.bonus_starting_gold()
@@ -43,12 +58,11 @@ class Game:
         self.enemies = []
         self.projectiles = []
         self.towers = {}  # (col, row) -> Tower
-        self.wave_mgr = WaveManager()
+        self.wave_mgr = WaveManager(self.map_path)
         self.paused = False
         self.game_over = False
         self.dragging_tower = None
         self.drag_origin = None
-        self.mouse_pos = (0, 0)
         self.floating_texts = []  # (x, y, text, color, life)
         self.tower_cost = TOWER_BASE_COST  # sera recalculado abaixo
         self.total_kills = 0
@@ -169,7 +183,7 @@ class Game:
             self.dragging_tower.being_dragged = True
             self.drag_origin = cell
             self.mouse_down_pos = pos
-        elif cell not in PATH_CELL_SET:
+        elif cell not in self.map_path.cell_set:
             # abre menu de escolha de tipo de torre para essa celula
             self.upgrade_open_cell = None
             self.shop_open_cell = cell
@@ -195,7 +209,7 @@ class Game:
                 return
         self.mouse_down_pos = None
 
-        if cell is None or cell == origin or cell in PATH_CELL_SET:
+        if cell is None or cell == origin or cell in self.map_path.cell_set:
             self.dragging_tower = None
             self.drag_origin = None
             return
@@ -260,6 +274,8 @@ class Game:
     # ------------------------------------------------------------------
     def update(self, dt):
         self.mouse_pos = pygame.mouse.get_pos()
+        if self.state == "map_select":
+            return
         self.hovered_cell = self.cell_from_pixel(*self.mouse_pos)
 
         if self.game_over or self.paused:
@@ -301,7 +317,7 @@ class Game:
                     self.game_over = True
             else:
                 # morreu por dano de torre
-                gold_gain = int(round(e.gold * self.meta.gold_mult()))
+                gold_gain = int(round(e.gold * self.meta.gold_mult() * self.map_path.gold_mult))
                 self.gold += gold_gain
                 self.total_kills += 1
                 self.add_floating_text(e.x, e.y, f"+{gold_gain}g", COL_GOLD)
@@ -319,10 +335,16 @@ class Game:
     # DESENHO
     # ------------------------------------------------------------------
     def draw(self):
+        if self.state == "map_select":
+            map_menu.draw_map_menu(self, self.screen)
+            pygame.display.flip()
+            return
+
         self.screen.fill(COL_BG)
         offset = (0, 0)
         board.draw_path(self.screen, offset)
         board.draw_grid(self, self.screen)
+        board.draw_path(self.screen, offset, self.map_path)
 
         for e in self.enemies:
             e.draw(self.screen, offset)
@@ -390,6 +412,8 @@ class Game:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         running = False
+                    elif self.state == "map_select":
+                        pass  # nenhum atalho de teclado no menu de mapas
                     elif event.key == pygame.K_p and not self.game_over:
                         self.paused = not self.paused
                     elif event.key == pygame.K_SPACE and not self.game_over:
@@ -404,10 +428,21 @@ class Game:
                         self.shop_open_cell = None
                         self.upgrade_open_cell = None
                     elif event.key == pygame.K_r and self.game_over:
-                        self.reset()
+                        self.state = "map_select"
+                    elif event.key == pygame.K_m:
+                        # volta ao menu de mapas a qualquer momento
+                        self.state = "map_select"
+                        self.meta_shop_open = False
+                        self.shop_open_cell = None
+                        self.upgrade_open_cell = None
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:
-                        if self.meta_shop_open:
+                        if self.state == "map_select":
+                            for rect, map_id in map_menu.map_card_rects():
+                                if rect.collidepoint(event.pos):
+                                    self.start_map(map_id)
+                                    break
+                        elif self.meta_shop_open:
                             self.handle_meta_shop_click(event.pos)
                         elif self.gem_button_rect is not None and self.gem_button_rect.collidepoint(event.pos):
                             self.meta_shop_open = True
@@ -418,7 +453,7 @@ class Game:
                         else:
                             self.handle_click_down(event.pos)
                 elif event.type == pygame.MOUSEBUTTONUP:
-                    if event.button == 1:
+                    if event.button == 1 and self.state != "map_select":
                         self.handle_click_up(event.pos)
 
             self.update(dt)

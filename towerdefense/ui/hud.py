@@ -16,6 +16,7 @@ from ..config import (
 )
 from ..fonts import get_font
 from ..entities.tower import tower_color
+from ..maps import MAP_DEFS
 
 
 def draw_gem_icon(surf, cx, cy, size):
@@ -52,6 +53,10 @@ def draw_hud(game, surf):
 
     kills_txt = font_small.render(f"Abates: {game.total_kills}", True, COL_TEXT_DIM)
     surf.blit(kills_txt, (620, 22))
+
+    map_name = MAP_DEFS[game.selected_map_id]["name"]
+    map_txt = font_small.render(f"Mapa: {map_name} (M)", True, COL_TEXT_DIM)
+    surf.blit(map_txt, (440, 44))
 
     # gemas: recurso mais valioso do jogo, ganho matando bosses.
     # tambem funciona como botao para abrir o shop de melhorias (G).
@@ -109,7 +114,7 @@ def draw_legend(surf):
     x = 20
     txt1 = font.render(
         "Slot vazio: torre.  |  Arraste sobre MESMO TIPO: MERGE (maior nivel persiste).  |  "
-        "Clique: MELHORIAS.  |  G: gemas.", True, COL_TEXT_DIM)
+        "Clique: MELHORIAS.  |  G: gemas.  |  M: trocar de mapa.", True, COL_TEXT_DIM)
     surf.blit(txt1, (x, y))
     # legenda de cores de nivel
     ly = y + 26
@@ -138,6 +143,6 @@ def draw_game_over(game, surf):
     t3 = font_med.render(f"Total de abates: {game.total_kills}", True, COL_TEXT_DIM)
     r3 = t3.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 40))
     surf.blit(t3, r3)
-    t4 = font_med.render("Pressione R para reiniciar", True, COL_GOLD)
+    t4 = font_med.render("Pressione R para escolher outro mapa", True, COL_GOLD)
     r4 = t4.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 90))
     surf.blit(t4, r4)
