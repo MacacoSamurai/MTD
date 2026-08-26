@@ -7,13 +7,13 @@ from ..config import (
     ENEMY_TYPES, COL_HP_BG, COL_HP_FG, COL_RED,
     BOSS_WAVE_INTERVAL, BOSS_HP_SCALE_PER_CYCLE, BOSS_GEMS_PER_CYCLE,
 )
-from ..paths import point_at_distance, PATH_TOTAL_LEN
 from ..fonts import get_font
 
 
 class Enemy:
-    def __init__(self, kind, wave, hp_mult, speed_mult):
+    def __init__(self, kind, wave, hp_mult, speed_mult, map_path):
         base = ENEMY_TYPES[kind]
+        self.map_path = map_path
         self.kind = kind
         self.dist = 0.0
         self.is_boss = base.get("is_boss", False)
@@ -35,7 +35,7 @@ class Enemy:
         self.color = base["color"]
         self.armor = base["armor"]
         self.shape = base["shape"]
-        self.x, self.y, self.angle = point_at_distance(0)
+        self.x, self.y, self.angle = map_path.point_at_distance(0)
         self.alive = True
         self.slow_timer = 0.0
         self.slow_factor = 1.0
@@ -49,11 +49,11 @@ class Enemy:
                 self.slow_factor = 1.0
         eff_speed = self.speed * self.slow_factor
         self.dist += eff_speed * dt
-        if self.dist >= PATH_TOTAL_LEN:
+        if self.dist >= self.map_path.total_len:
             self.reached_end = True
             self.alive = False
             return
-        self.x, self.y, self.angle = point_at_distance(self.dist)
+        self.x, self.y, self.angle = self.map_path.point_at_distance(self.dist)
 
     def apply_slow(self, factor, duration):
         # sempre pega o slow mais forte ativo
