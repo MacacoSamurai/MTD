@@ -342,20 +342,22 @@ class Game:
 
         self.screen.fill(COL_BG)
         offset = (0, 0)
+        board.draw_path(self.screen, offset)
+        board.draw_grid(self, self.screen)
         board.draw_path(self.screen, offset, self.map_path)
 
         for e in self.enemies:
             e.draw(self.screen, offset)
 
-        for p in self.projectiles:
-            p.draw(self.screen, offset)
-
-        board.draw_grid(self, self.screen)
-
         # torres (nao-arrastadas primeiro)
         for cell, t in self.towers.items():
             if t is not self.dragging_tower:
                 t.draw(self.screen, None, False)
+
+        # projeteis: desenhados DEPOIS da grade e das torres para nao
+        # passarem "por baixo" delas visualmente (bug MTD-corretiva)
+        for p in self.projectiles:
+            p.draw(self.screen, offset)
 
         menus.draw_tower_range_hover(self, self.screen, offset)
 
