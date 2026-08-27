@@ -113,8 +113,9 @@ def draw_legend(surf):
     y = HEIGHT - BOTTOM_HUD_HEIGHT + 10
     x = 20
     txt1 = font.render(
-        "Slot vazio: torre.  |  Arraste sobre MESMO TIPO: MERGE (maior nivel persiste).  |  "
-        "Clique: MELHORIAS.  |  G: gemas.  |  M: trocar de mapa.", True, COL_TEXT_DIM)
+        "Arraste do painel: compra torre.  |  Arraste sobre MESMO TIPO: MERGE (maior nivel persiste).  |  "
+        "Clique numa torre: MELHORIAS no painel.  |  T: abre/fecha painel.  |  G: gemas.  |  M: trocar de mapa.",
+        True, COL_TEXT_DIM)
     surf.blit(txt1, (x, y))
     # legenda de cores de nivel
     ly = y + 26

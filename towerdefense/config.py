@@ -26,6 +26,17 @@ GRID_ORIGIN_Y = TOP_HUD_HEIGHT
 PANEL_WIDTH = WIDTH  # mantido por compatibilidade com HUD que usa toda a largura
 
 # ----------------------------------------------------------------------------
+# PAINEL LATERAL DE TORRES (estilo Bloons TD)
+# Fica sobreposto na frente do grid (nao redimensiona a area de jogo).
+# Pode abrir/fechar deslizando; quando fechado fica totalmente fora da tela.
+# ----------------------------------------------------------------------------
+TOWER_PANEL_WIDTH = 230
+TOWER_PANEL_CARD_H = 96
+TOWER_PANEL_CARD_GAP = 10
+TOWER_PANEL_SLIDE_SPEED = 1900  # px/s da animacao de abrir/fechar
+TOWER_PANEL_DOUBLE_CLICK_MS = 400  # janela para o "2 cliques = auto-coloca"
+
+# ----------------------------------------------------------------------------
 # ECONOMIA / REGRAS GERAIS
 # ----------------------------------------------------------------------------
 STARTING_GOLD = 220
