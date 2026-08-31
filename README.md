@@ -3,6 +3,15 @@
 Jogo de tower defense com fusao (merge) de torres, ondas infinitas e
 progressao permanente via loja de gemas.
 
+## Fluxo de telas
+
+1. **Menu principal** - tela de titulo com os botoes **Jogar**, **Como
+   Jogar** (abre um resumo das regras e controles) e **Sair**.
+2. **Selecao de mapa** - escolha um dos mapas disponiveis para comecar a
+   partida. ESC volta ao menu principal.
+3. **Partida** - o jogo em si (grade, torres, ondas). Pressione **M** a
+   qualquer momento para voltar a selecao de mapa.
+
 ## Como jogar
 
 - Clique num slot vazio da grade para abrir o menu e **escolher o tipo**
@@ -31,7 +40,8 @@ progressao permanente via loja de gemas.
 | G                    | Abrir/fechar a loja de gemas                                          |
 | P                    | Pausar/despausar                                                     |
 | R                    | Reiniciar apos game over (gemas e melhorias permanentes persistem)    |
-| ESC / fechar janela  | Sair                                                                 |
+| ESC                  | Fecha o "Como Jogar" / volta ao menu principal / sai do jogo (conforme a tela) |
+| Fechar janela        | Sair                                                                 |
 
 ## Tipos de torre
 
@@ -72,9 +82,11 @@ tower_defense_project/
     │   └── meta_upgrades.py        # MetaUpgrades: loja de gemas (progressao permanente)
     └── ui/
         ├── __init__.py
-        ├── board.py                 # desenho do caminho e da grade
-        ├── hud.py                    # HUD (ouro/vidas/onda), legenda, tela de game over
-        └── menus.py                  # menu de compra, menu de upgrade, loja de gemas, tooltip
+        ├── main_menu.py               # tela de titulo (Jogar / Como Jogar / Sair)
+        ├── map_menu.py                # tela de selecao de mapa
+        ├── board.py                   # desenho do caminho e da grade
+        ├── hud.py                     # HUD (ouro/vidas/onda), legenda, tela de game over
+        └── menus.py                   # menu de compra, menu de upgrade, loja de gemas, tooltip
 ```
 
 ### Por que essa divisao?

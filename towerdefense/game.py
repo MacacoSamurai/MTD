@@ -19,7 +19,7 @@ from .maps import DEFAULT_MAP_ID
 from .entities import Tower
 from .systems import WaveManager, MetaUpgrades
 from .fonts import get_font
-from .ui import hud, menus, board, map_menu
+from .ui import hud, menus, board, map_menu, main_menu
 
 
 class Game:
@@ -37,9 +37,11 @@ class Game:
         self.meta_shop_open = False
         self.gem_button_rect = None
         self.mouse_pos = (0, 0)
-        # estado geral do jogo: comeca no menu de selecao de mapa.
-        # "map_select" -> escolhendo mapa | "playing" -> partida em curso
-        self.state = "map_select"
+        # estado geral do jogo: comeca no menu principal (tela de titulo).
+        # "main_menu" -> tela de titulo | "map_select" -> escolhendo mapa
+        # | "playing" -> partida em curso
+        self.state = "main_menu"
+        self.show_help = False
         self.selected_map_id = DEFAULT_MAP_ID
         self.map_path = MapPath(self.selected_map_id)
         self.reset()
@@ -274,7 +276,7 @@ class Game:
     # ------------------------------------------------------------------
     def update(self, dt):
         self.mouse_pos = pygame.mouse.get_pos()
-        if self.state == "map_select":
+        if self.state in ("map_select", "main_menu"):
             return
         self.hovered_cell = self.cell_from_pixel(*self.mouse_pos)
 
@@ -335,6 +337,11 @@ class Game:
     # DESENHO
     # ------------------------------------------------------------------
     def draw(self):
+        if self.state == "main_menu":
+            main_menu.draw_main_menu(self, self.screen)
+            pygame.display.flip()
+            return
+
         if self.state == "map_select":
             map_menu.draw_map_menu(self, self.screen)
             pygame.display.flip()
@@ -410,8 +417,14 @@ class Game:
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
+                    if event.key == pygame.K_ESCAPE and self.state == "main_menu" and self.show_help:
+                        self.show_help = False  # ESC fecha o "Como Jogar" antes de sair
+                    elif event.key == pygame.K_ESCAPE and self.state == "map_select":
+                        self.state = "main_menu"  # ESC volta ao menu principal
+                    elif event.key == pygame.K_ESCAPE:
                         running = False
+                    elif self.state == "main_menu":
+                        pass  # sem atalhos extras; usar os botoes do menu
                     elif self.state == "map_select":
                         pass  # nenhum atalho de teclado no menu de mapas
                     elif event.key == pygame.K_p and not self.game_over:
@@ -437,7 +450,23 @@ class Game:
                         self.upgrade_open_cell = None
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:
-                        if self.state == "map_select":
+                        if self.state == "main_menu":
+                            if self.show_help:
+                                if main_menu.help_close_rect().collidepoint(event.pos):
+                                    self.show_help = False
+                                elif not main_menu.help_panel_rect().collidepoint(event.pos):
+                                    self.show_help = False
+                            else:
+                                for rect, action in main_menu.button_rects():
+                                    if rect.collidepoint(event.pos):
+                                        if action == "play":
+                                            self.state = "map_select"
+                                        elif action == "help":
+                                            self.show_help = True
+                                        elif action == "quit":
+                                            running = False
+                                        break
+                        elif self.state == "map_select":
                             for rect, map_id in map_menu.map_card_rects():
                                 if rect.collidepoint(event.pos):
                                     self.start_map(map_id)
@@ -453,7 +482,7 @@ class Game:
                         else:
                             self.handle_click_down(event.pos)
                 elif event.type == pygame.MOUSEBUTTONUP:
-                    if event.button == 1 and self.state != "map_select":
+                    if event.button == 1 and self.state not in ("map_select", "main_menu"):
                         self.handle_click_up(event.pos)
 
             self.update(dt)
