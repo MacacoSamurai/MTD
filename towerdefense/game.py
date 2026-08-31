@@ -349,7 +349,6 @@ class Game:
 
         self.screen.fill(COL_BG)
         offset = (0, 0)
-        board.draw_path(self.screen, offset)
         board.draw_grid(self, self.screen)
         board.draw_path(self.screen, offset, self.map_path)
 
