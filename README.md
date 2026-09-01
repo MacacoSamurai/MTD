@@ -3,6 +3,15 @@
 Jogo de tower defense com fusao (merge) de torres, ondas infinitas e
 progressao permanente via loja de gemas.
 
+## Fluxo de telas
+
+1. **Menu principal** - tela de titulo com os botoes **Jogar**, **Como
+   Jogar** (abre um resumo das regras e controles) e **Sair**.
+2. **Selecao de mapa** - escolha um dos mapas disponiveis para comecar a
+   partida. ESC volta ao menu principal.
+3. **Partida** - o jogo em si (grade, torres, ondas). Pressione **M** a
+   qualquer momento para voltar a selecao de mapa.
+
 ## Como jogar
 
 - Um **painel lateral fixo** (estilo Bloons TD) mostra todos os tipos de
@@ -38,7 +47,8 @@ progressao permanente via loja de gemas.
 | G                    | Abrir/fechar a loja de gemas                                          |
 | P                    | Pausar/despausar                                                     |
 | R                    | Reiniciar apos game over (gemas e melhorias permanentes persistem)    |
-| ESC / fechar janela  | Sair                                                                 |
+| ESC                  | Fecha o "Como Jogar" / volta ao menu principal / sai do jogo (conforme a tela) |
+| Fechar janela        | Sair                                                                 |
 
 ## Tipos de torre
 

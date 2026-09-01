@@ -51,12 +51,25 @@ def draw_hud(game, surf):
     wave_txt = font_big.render(f"Onda: {game.wave_mgr.wave_num}", True, COL_TEXT)
     surf.blit(wave_txt, (440, 16))
 
+    # status da onda: fica logo ABAIXO do "Onda: X", alinhado a esquerda
+    # (antes ficava centralizado num ponto que sobrepunha o texto do
+    # mapa/abates aqui do lado; por isso "quebrava" visualmente).
+    if game.wave_mgr.wave_active:
+        status = f"Onda em andamento ({len(game.enemies)} vivos)"
+        scol = COL_TEXT
+    else:
+        remaining = max(0, game.wave_mgr.auto_start_delay - game.wave_mgr.time_since_wave_end)
+        status = f"Proxima onda em {remaining:0.1f}s (ESPACO)"
+        scol = COL_TEXT_DIM
+    status_txt = font_small.render(status, True, scol)
+    surf.blit(status_txt, (440, 46))
+
     kills_txt = font_small.render(f"Abates: {game.total_kills}", True, COL_TEXT_DIM)
-    surf.blit(kills_txt, (620, 22))
+    surf.blit(kills_txt, (660, 16))
 
     map_name = MAP_DEFS[game.selected_map_id]["name"]
     map_txt = font_small.render(f"Mapa: {map_name} (M)", True, COL_TEXT_DIM)
-    surf.blit(map_txt, (440, 44))
+    surf.blit(map_txt, (660, 46))
 
     # gemas: recurso mais valioso do jogo, ganho matando bosses.
     # tambem funciona como botao para abrir o shop de melhorias (G).
@@ -76,29 +89,24 @@ def draw_hud(game, surf):
     crect.topright = (gem_rect.x - 14, 22)
     surf.blit(cost_txt, crect)
 
-    # status da onda
-    if game.wave_mgr.wave_active:
-        status = f"Onda {game.wave_mgr.wave_num} em andamento ({len(game.enemies)} vivos)"
-        scol = COL_TEXT
-    else:
-        remaining = max(0, game.wave_mgr.auto_start_delay - game.wave_mgr.time_since_wave_end)
-        status = f"Proxima onda em {remaining:0.1f}s (ESPACO)"
-        scol = COL_TEXT_DIM
-    status_txt = font_small.render(status, True, scol)
-    rect = status_txt.get_rect(center=(WIDTH // 2 - 130, 50))
-    surf.blit(status_txt, rect)
-
-    # botao de pular onda (da ouro extra, mas antecipa a proxima onda)
+    # botao de pular onda (da ouro extra, mas antecipa a proxima onda).
+    # Fica desabilitado (cinza, sem hover) enquanto o jogo esta pausado.
     bonus = SKIP_WAVE_BASE_BONUS + game.wave_mgr.wave_num * SKIP_WAVE_BONUS_PER_WAVE
     btn_w, btn_h = 190, 34
     btn_rect = pygame.Rect(0, 0, btn_w, btn_h)
     btn_rect.center = (WIDTH // 2 + 150, 50)
-    game.skip_button_rect = btn_rect
-    hovered = btn_rect.collidepoint(game.mouse_pos)
-    btn_bg = (70, 60, 30) if hovered else (48, 42, 26)
+    game.skip_button_rect = None if game.paused else btn_rect
+    if game.paused:
+        btn_bg = (40, 40, 44)
+        btn_border = COL_TEXT_DIM
+        btn_txt = font_small.render("Pular onda (N)", True, COL_TEXT_DIM)
+    else:
+        hovered = btn_rect.collidepoint(game.mouse_pos)
+        btn_bg = (70, 60, 30) if hovered else (48, 42, 26)
+        btn_border = COL_GOLD
+        btn_txt = font_small.render(f"Pular onda (N)  +{bonus}g", True, COL_GOLD)
     pygame.draw.rect(surf, btn_bg, btn_rect, border_radius=8)
-    pygame.draw.rect(surf, COL_GOLD, btn_rect, 2, border_radius=8)
-    btn_txt = font_small.render(f"Pular onda (N)  +{bonus}g", True, COL_GOLD)
+    pygame.draw.rect(surf, btn_border, btn_rect, 2, border_radius=8)
     t_rect = btn_txt.get_rect(center=btn_rect.center)
     surf.blit(btn_txt, t_rect)
 

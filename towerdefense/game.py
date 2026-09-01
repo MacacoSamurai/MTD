@@ -8,7 +8,7 @@ import sys
 import pygame
 
 from .config import (
-    WIDTH, HEIGHT, FPS, COL_BG, COL_MERGE_GLOW,
+    WIDTH, HEIGHT, FPS, COL_BG, COL_MERGE_GLOW, COL_SWAP_GLOW,
     STARTING_GOLD, STARTING_LIVES, TOWER_BASE_COST,
     SKIP_WAVE_BASE_BONUS, SKIP_WAVE_BONUS_PER_WAVE,
     GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_COLS, GRID_ROWS, CELL_SIZE,
@@ -38,9 +38,11 @@ class Game:
         self.meta_shop_open = False
         self.gem_button_rect = None
         self.mouse_pos = (0, 0)
-        # estado geral do jogo: comeca no menu de selecao de mapa.
-        # "map_select" -> escolhendo mapa | "playing" -> partida em curso
-        self.state = "map_select"
+        # estado geral do jogo: comeca no menu principal (tela de titulo).
+        # "main_menu" -> tela de titulo | "map_select" -> escolhendo mapa
+        # | "playing" -> partida em curso
+        self.state = "main_menu"
+        self.show_help = False
         self.selected_map_id = DEFAULT_MAP_ID
         self.map_path = MapPath(self.selected_map_id)
         self.reset()
@@ -140,7 +142,7 @@ class Game:
         """Pula para a proxima onda antes da hora. Da um bonus de ouro
         mas a proxima onda passa a vir junto com o que restar da atual
         (mais inimigos na tela ao mesmo tempo = mais dificil)."""
-        if self.game_over:
+        if self.game_over or self.paused:
             return
         bonus = SKIP_WAVE_BASE_BONUS + self.wave_mgr.wave_num * SKIP_WAVE_BONUS_PER_WAVE
         self.gold += bonus
@@ -311,19 +313,32 @@ class Game:
             if target_tower is tower:
                 pass
             elif target_tower.ttype == tower.ttype:
-                # MERGE! (mesmo tipo). Se os niveis forem iguais, sobe um
-                # nivel (comportamento classico de merge). Se forem
-                # diferentes, o nivel da torre MAIS FORTE persiste (nao
-                # se perde nivel ao juntar uma fraca com uma forte).
                 if target_tower.level == tower.level:
+                    # MERGE! So ocorre quando as duas torres tem o MESMO
+                    # nivel: o nivel da torre resultante sobe em 1. Cada
+                    # aspecto de melhoria (dano/alcance/cadencia) comprado
+                    # no menu de upgrades fica com o MELHOR (maior) valor
+                    # entre as duas torres — ex.: lvl3 de alcance + lvl5
+                    # de alcance funde para lvl5 de alcance, nunca some.
                     new_level = target_tower.level + 1
+                    merged_upgrades = {
+                        aspect: max(target_tower.upgrades[aspect], tower.upgrades[aspect])
+                        for aspect in target_tower.upgrades
+                    }
+                    target_tower.level = new_level
+                    target_tower.upgrades = merged_upgrades
+                    target_tower.recalc_stats()
+                    del self.towers[origin]
+                    cx, cy = target_tower.grid_pos()
+                    self.add_floating_text(cx, cy - 20, f"MERGE! Nv.{new_level}", COL_MERGE_GLOW)
                 else:
-                    new_level = max(target_tower.level, tower.level)
-                target_tower.level = new_level
-                target_tower.recalc_stats()
-                del self.towers[origin]
-                cx, cy = target_tower.grid_pos()
-                self.add_floating_text(cx, cy - 20, f"MERGE! Nv.{new_level}", COL_MERGE_GLOW)
+                    # Niveis diferentes: merge e proibido. As torres apenas
+                    # trocam de lugar (nenhuma delas ganha ou perde nivel
+                    # ou melhorias).
+                    target_tower.col, target_tower.row = origin
+                    tower.col, tower.row = cell
+                    self.towers[origin] = target_tower
+                    self.towers[cell] = tower
             else:
                 # tipos diferentes: nao faz nada, volta pro lugar
                 pass
@@ -366,7 +381,7 @@ class Game:
     # ------------------------------------------------------------------
     def update(self, dt):
         self.mouse_pos = pygame.mouse.get_pos()
-        if self.state == "map_select":
+        if self.state in ("map_select", "main_menu"):
             return
         self.hovered_cell = self.cell_from_pixel(*self.mouse_pos)
         self.update_tower_panel_slide(dt)
@@ -428,6 +443,11 @@ class Game:
     # DESENHO
     # ------------------------------------------------------------------
     def draw(self):
+        if self.state == "main_menu":
+            main_menu.draw_main_menu(self, self.screen)
+            pygame.display.flip()
+            return
+
         if self.state == "map_select":
             map_menu.draw_map_menu(self, self.screen)
             pygame.display.flip()
@@ -460,10 +480,16 @@ class Game:
                 x = GRID_ORIGIN_X + cell[0] * CELL_SIZE
                 y = GRID_ORIGIN_Y + cell[1] * CELL_SIZE
                 rect = pygame.Rect(x, y, CELL_SIZE, CELL_SIZE)
-                valid_merge = (cell in self.towers and
-                               self.towers[cell].ttype == self.dragging_tower.ttype and
-                               self.towers[cell] is not self.dragging_tower)
-                col = COL_MERGE_GLOW if valid_merge else (120, 120, 130)
+                target_here = self.towers.get(cell)
+                same_type = (target_here is not None and
+                             target_here.ttype == self.dragging_tower.ttype and
+                             target_here is not self.dragging_tower)
+                if same_type and target_here.level == self.dragging_tower.level:
+                    col = COL_MERGE_GLOW  # merge: mesmo tipo e mesmo nivel
+                elif same_type:
+                    col = COL_SWAP_GLOW  # mesmo tipo, nivel diferente: so troca de lugar
+                else:
+                    col = (120, 120, 130)
                 pygame.draw.rect(self.screen, col, rect.inflate(-4, -4), 3, border_radius=8)
 
         # preview da celula alvo enquanto arrasta uma torre nova do painel
@@ -513,8 +539,14 @@ class Game:
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
+                    if event.key == pygame.K_ESCAPE and self.state == "main_menu" and self.show_help:
+                        self.show_help = False  # ESC fecha o "Como Jogar" antes de sair
+                    elif event.key == pygame.K_ESCAPE and self.state == "map_select":
+                        self.state = "main_menu"  # ESC volta ao menu principal
+                    elif event.key == pygame.K_ESCAPE:
                         running = False
+                    elif self.state == "main_menu":
+                        pass  # sem atalhos extras; usar os botoes do menu
                     elif self.state == "map_select":
                         pass  # nenhum atalho de teclado no menu de mapas
                     elif event.key == pygame.K_p and not self.game_over:
@@ -541,7 +573,23 @@ class Game:
                         self.dragging_from_panel = None
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:
-                        if self.state == "map_select":
+                        if self.state == "main_menu":
+                            if self.show_help:
+                                if main_menu.help_close_rect().collidepoint(event.pos):
+                                    self.show_help = False
+                                elif not main_menu.help_panel_rect().collidepoint(event.pos):
+                                    self.show_help = False
+                            else:
+                                for rect, action in main_menu.button_rects():
+                                    if rect.collidepoint(event.pos):
+                                        if action == "play":
+                                            self.state = "map_select"
+                                        elif action == "help":
+                                            self.show_help = True
+                                        elif action == "quit":
+                                            running = False
+                                        break
+                        elif self.state == "map_select":
                             for rect, map_id in map_menu.map_card_rects():
                                 if rect.collidepoint(event.pos):
                                     self.start_map(map_id)
@@ -556,7 +604,7 @@ class Game:
                         else:
                             self.handle_click_down(event.pos)
                 elif event.type == pygame.MOUSEBUTTONUP:
-                    if event.button == 1 and self.state != "map_select":
+                    if event.button == 1 and self.state not in ("map_select", "main_menu"):
                         self.handle_click_up(event.pos)
 
             self.update(dt)
