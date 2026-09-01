@@ -110,6 +110,16 @@ Se for adicionar um menu/tela nova, siga esse padrao (veja
   descarta os inimigos restantes; a fila da proxima onda e intercalada
   com o que sobrou, entao mais inimigos aparecem juntos (ver comentario
   longo em `systems/waves.py`).
+- **Merge so ocorre com mesmo nivel**: arrastar uma torre sobre outra do
+  mesmo tipo so funde (`level += 1`) quando as duas tem exatamente o
+  mesmo `level`. Nesse caso, cada aspecto de melhoria comprado no menu
+  (`upgrades["damage"|"range"|"rate"]`) fica com o MAIOR valor entre as
+  duas torres — nunca ha perda de melhoria ao fundir. Se os niveis forem
+  diferentes, o merge e proibido: as torres apenas trocam de lugar na
+  grade (cada uma mantem seu proprio nivel e upgrades). Ver
+  `Game.handle_click_up` em `game.py`. O indicador visual de arrasto
+  usa `COL_MERGE_GLOW` (fusao valida) vs `COL_SWAP_GLOW` (mesmo tipo,
+  nivel diferente -> so troca) vs cinza (tipos incompativeis).
 - **Cores/nomes de nivel de torre nao tem teto**: `tower_color()` e
   `tower_name()` em `entities/tower.py` usam tabelas fixas para os
   primeiros niveis e depois geram cor (rotacao de matiz) e nome

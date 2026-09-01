@@ -68,6 +68,7 @@ COL_WHITE = (255, 255, 255)
 COL_RED = (230, 70, 70)
 COL_GREEN = (90, 220, 110)
 COL_MERGE_GLOW = (255, 255, 140)
+COL_SWAP_GLOW = (140, 190, 255)
 
 # Niveis de torre: cores fixas para os primeiros niveis; alem disso a cor
 # eh gerada proceduralmente (ciclo de matiz infinito) para nunca "estourar".

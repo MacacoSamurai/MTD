@@ -17,9 +17,12 @@ progressao permanente via loja de gemas.
 - Clique num slot vazio da grade para abrir o menu e **escolher o tipo**
   de torre a comprar (custa ouro).
 - Clique e **arraste** uma torre sobre **outra torre do mesmo tipo** para
-  dar **merge**. Se as duas tiverem o mesmo nivel, o resultado sobe um
-  nivel. Se os niveis forem diferentes, o nivel mais alto persiste. Nao
-  ha nivel maximo.
+  dar **merge**. So ocorre fusao se as duas tiverem **exatamente o mesmo
+  nivel** — nesse caso o resultado sobe um nivel, e cada melhoria (Dano/
+  Alcance/Cadencia) comprada fica com o **melhor valor entre as duas**
+  (ex.: alcance nv.3 + alcance nv.5 -> fusao fica com alcance nv.5). Se
+  os niveis forem diferentes, o merge e recusado e as torres apenas
+  **trocam de lugar** na grade. Nao ha nivel maximo.
 - Clique **rapido** (sem arrastar) em cima de uma torre para abrir o
   **menu de melhorias**: gaste ouro para melhorar Dano, Alcance ou
   Cadencia daquela torre especificamente.

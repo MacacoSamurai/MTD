@@ -8,7 +8,7 @@ import sys
 import pygame
 
 from .config import (
-    WIDTH, HEIGHT, FPS, COL_BG, COL_MERGE_GLOW,
+    WIDTH, HEIGHT, FPS, COL_BG, COL_MERGE_GLOW, COL_SWAP_GLOW,
     STARTING_GOLD, STARTING_LIVES, TOWER_BASE_COST,
     SKIP_WAVE_BASE_BONUS, SKIP_WAVE_BONUS_PER_WAVE,
     GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_COLS, GRID_ROWS, CELL_SIZE,
@@ -221,19 +221,32 @@ class Game:
             if target_tower is tower:
                 pass
             elif target_tower.ttype == tower.ttype:
-                # MERGE! (mesmo tipo). Se os niveis forem iguais, sobe um
-                # nivel (comportamento classico de merge). Se forem
-                # diferentes, o nivel da torre MAIS FORTE persiste (nao
-                # se perde nivel ao juntar uma fraca com uma forte).
                 if target_tower.level == tower.level:
+                    # MERGE! So ocorre quando as duas torres tem o MESMO
+                    # nivel: o nivel da torre resultante sobe em 1. Cada
+                    # aspecto de melhoria (dano/alcance/cadencia) comprado
+                    # no menu de upgrades fica com o MELHOR (maior) valor
+                    # entre as duas torres — ex.: lvl3 de alcance + lvl5
+                    # de alcance funde para lvl5 de alcance, nunca some.
                     new_level = target_tower.level + 1
+                    merged_upgrades = {
+                        aspect: max(target_tower.upgrades[aspect], tower.upgrades[aspect])
+                        for aspect in target_tower.upgrades
+                    }
+                    target_tower.level = new_level
+                    target_tower.upgrades = merged_upgrades
+                    target_tower.recalc_stats()
+                    del self.towers[origin]
+                    cx, cy = target_tower.grid_pos()
+                    self.add_floating_text(cx, cy - 20, f"MERGE! Nv.{new_level}", COL_MERGE_GLOW)
                 else:
-                    new_level = max(target_tower.level, tower.level)
-                target_tower.level = new_level
-                target_tower.recalc_stats()
-                del self.towers[origin]
-                cx, cy = target_tower.grid_pos()
-                self.add_floating_text(cx, cy - 20, f"MERGE! Nv.{new_level}", COL_MERGE_GLOW)
+                    # Niveis diferentes: merge e proibido. As torres apenas
+                    # trocam de lugar (nenhuma delas ganha ou perde nivel
+                    # ou melhorias).
+                    target_tower.col, target_tower.row = origin
+                    tower.col, tower.row = cell
+                    self.towers[origin] = target_tower
+                    self.towers[cell] = tower
             else:
                 # tipos diferentes: nao faz nada, volta pro lugar
                 pass
@@ -375,10 +388,16 @@ class Game:
                 x = GRID_ORIGIN_X + cell[0] * CELL_SIZE
                 y = GRID_ORIGIN_Y + cell[1] * CELL_SIZE
                 rect = pygame.Rect(x, y, CELL_SIZE, CELL_SIZE)
-                valid_merge = (cell in self.towers and
-                               self.towers[cell].ttype == self.dragging_tower.ttype and
-                               self.towers[cell] is not self.dragging_tower)
-                col = COL_MERGE_GLOW if valid_merge else (120, 120, 130)
+                target_here = self.towers.get(cell)
+                same_type = (target_here is not None and
+                             target_here.ttype == self.dragging_tower.ttype and
+                             target_here is not self.dragging_tower)
+                if same_type and target_here.level == self.dragging_tower.level:
+                    col = COL_MERGE_GLOW  # merge: mesmo tipo e mesmo nivel
+                elif same_type:
+                    col = COL_SWAP_GLOW  # mesmo tipo, nivel diferente: so troca de lugar
+                else:
+                    col = (120, 120, 130)
                 pygame.draw.rect(self.screen, col, rect.inflate(-4, -4), 3, border_radius=8)
 
         menus.draw_shop_menu(self, self.screen)
