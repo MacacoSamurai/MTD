@@ -107,7 +107,7 @@ class Game:
         """Pula para a proxima onda antes da hora. Da um bonus de ouro
         mas a proxima onda passa a vir junto com o que restar da atual
         (mais inimigos na tela ao mesmo tempo = mais dificil)."""
-        if self.game_over:
+        if self.game_over or self.paused:
             return
         bonus = SKIP_WAVE_BASE_BONUS + self.wave_mgr.wave_num * SKIP_WAVE_BONUS_PER_WAVE
         self.gold += bonus
