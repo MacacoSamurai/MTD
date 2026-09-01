@@ -1,5 +1,8 @@
-"""Menus flutuantes: loja de tipo de torre, menu de melhorias por torre,
-loja de gemas (meta-upgrades) e o tooltip de alcance ao passar o mouse.
+"""Menus flutuantes: loja de gemas (meta-upgrades) e o tooltip de
+alcance ao passar o mouse.
+
+(O menu de compra de torre nova e o menu de melhorias por torre agora
+vivem no painel lateral fixo, ver ui/tower_panel.py.)
 
 As funcoes *_rects() calculam apenas geometria (pygame.Rect) e sao usadas
 tanto para desenhar quanto para testar cliques em game.py. As funcoes
@@ -10,13 +13,12 @@ import math
 import pygame
 
 from ..config import (
-    WIDTH, HEIGHT, TOP_HUD_HEIGHT, BOTTOM_HUD_HEIGHT, CELL_SIZE,
-    TOWER_TYPES, TOWER_TYPE_KEYS, META_UPGRADE_DEFS, META_UPGRADE_KEYS,
-    UPGRADE_LABELS, COL_GEM, COL_WHITE, COL_RED, COL_GOLD, COL_GREEN,
+    WIDTH, HEIGHT, TOP_HUD_HEIGHT,
+    TOWER_TYPES, META_UPGRADE_DEFS, META_UPGRADE_KEYS,
+    COL_GEM, COL_WHITE, COL_RED, COL_GOLD, COL_GREEN,
     COL_TEXT_DIM,
 )
 from ..fonts import get_font
-from ..paths import cell_center_px
 from ..entities.tower import tower_color
 from .hud import draw_gem_icon
 
@@ -24,53 +26,6 @@ from .hud import draw_gem_icon
 # ----------------------------------------------------------------------
 # GEOMETRIA (usada tanto para desenhar quanto para testar cliques)
 # ----------------------------------------------------------------------
-def shop_slot_rects(cell):
-    """Retorna lista de (rect, type_key) para os botoes do menu de
-    compra ancorado na celula clicada."""
-    cx, cy = cell_center_px(*cell)
-    n = len(TOWER_TYPE_KEYS)
-    w, h = 118, 30
-    gap = 6
-    total_h = n * h + (n - 1) * gap
-    start_y = cy - total_h // 2
-    start_y = max(TOP_HUD_HEIGHT + 6, min(start_y, HEIGHT - BOTTOM_HUD_HEIGHT - total_h - 6))
-    x = cx + CELL_SIZE  # abre para a direita da celula
-    if x + w > WIDTH - 10:
-        x = cx - CELL_SIZE - w
-    rects = []
-    for i, key in enumerate(TOWER_TYPE_KEYS):
-        r = pygame.Rect(x, start_y + i * (h + gap), w, h)
-        rects.append((r, key))
-    return rects
-
-
-def upgrade_menu_rects(towers, cell):
-    """Retorna (rects, close_rect, panel_rect) para o menu de melhorias
-    (dano, alcance, cadencia) ancorado na torre da celula. towers e o
-    dict {(col,row): Tower} atual do jogo. cell deve conter uma torre."""
-    if cell not in towers:
-        return [], None, None
-    cx, cy = cell_center_px(*cell)
-    w, h = 190, 46
-    gap = 8
-    header_h = 34
-    n = 3
-    total_h = header_h + n * h + (n - 1) * gap + 10
-    x = cx + CELL_SIZE
-    if x + w > WIDTH - 10:
-        x = cx - CELL_SIZE - w
-    y = cy - total_h // 2
-    y = max(TOP_HUD_HEIGHT + 6, min(y, HEIGHT - BOTTOM_HUD_HEIGHT - total_h - 6))
-    close_rect = pygame.Rect(x + w - 26, y + 4, 20, 20)
-    rects = []
-    aspects = ["damage", "range", "rate"]
-    for i, aspect in enumerate(aspects):
-        r = pygame.Rect(x + 10, y + header_h + i * (h + gap), w - 20, h)
-        rects.append((r, aspect))
-    panel_rect = pygame.Rect(x, y, w, total_h)
-    return rects, close_rect, panel_rect
-
-
 def meta_shop_rects():
     """Retorna (rects, close_rect, panel_rect) para os botoes do shop de
     gemas, organizados em um painel central."""
@@ -142,91 +97,6 @@ def draw_tower_range_hover(game, surf, offset):
         t_surf = fnt.render(line, True, COL_WHITE if i == 0 else COL_TEXT_DIM)
         box.blit(t_surf, (pad, pad // 2 + i * 20))
     surf.blit(box, (tx, ty))
-
-
-def draw_shop_menu(game, surf):
-    cell = game.shop_open_cell
-    if cell is None:
-        return
-    for rect, ttype in shop_slot_rects(cell):
-        spec = TOWER_TYPES[ttype]
-        color = spec["base_color"]
-        affordable = game.gold >= game.tower_cost
-        bg = (34, 40, 52) if affordable else (30, 30, 34)
-        pygame.draw.rect(surf, bg, rect, border_radius=6)
-        pygame.draw.rect(surf, color, rect, 2, border_radius=6)
-        pygame.draw.circle(surf, color, (rect.x + 16, rect.centery), 8)
-        font = get_font(13, bold=True)
-        txt = font.render(spec["label"], True, COL_WHITE if affordable else COL_TEXT_DIM)
-        surf.blit(txt, (rect.x + 30, rect.y + 4))
-        font2 = get_font(11)
-        txt2 = font2.render(f"{game.tower_cost}g", True, COL_GOLD if affordable else COL_TEXT_DIM)
-        surf.blit(txt2, (rect.x + 30, rect.y + 17))
-
-
-def draw_upgrade_menu(game, surf):
-    cell = game.upgrade_open_cell
-    if cell is None or cell not in game.towers:
-        return
-    tower = game.towers[cell]
-    rects, close_rect, panel_rect = upgrade_menu_rects(game.towers, cell)
-
-    # painel de fundo
-    panel = pygame.Surface((panel_rect.w, panel_rect.h), pygame.SRCALPHA)
-    pygame.draw.rect(panel, (22, 26, 36, 245), (0, 0, panel_rect.w, panel_rect.h), border_radius=10)
-    color = tower_color(tower.level)
-    pygame.draw.rect(panel, (*color, 255), (0, 0, panel_rect.w, panel_rect.h), 2, border_radius=10)
-    surf.blit(panel, panel_rect.topleft)
-
-    # cabecalho: nome da torre + nivel
-    font_h = get_font(15, bold=True)
-    label = TOWER_TYPES[tower.ttype]["label"]
-    header = font_h.render(f"{label} - Nv.{tower.level}", True, COL_WHITE)
-    surf.blit(header, (panel_rect.x + 10, panel_rect.y + 8))
-
-    # botao fechar (X)
-    pygame.draw.rect(surf, (60, 40, 40), close_rect, border_radius=4)
-    pygame.draw.rect(surf, COL_RED, close_rect, 1, border_radius=4)
-    font_x = get_font(14, bold=True)
-    x_txt = font_x.render("X", True, COL_WHITE)
-    surf.blit(x_txt, x_txt.get_rect(center=close_rect.center))
-
-    # botoes de melhoria
-    font_lbl = get_font(14, bold=True)
-    font_val = get_font(12)
-    for rect, aspect in rects:
-        pts = tower.upgrades[aspect]
-        cost = int(round(tower.upgrade_cost(aspect) * game.meta.upgrade_cost_mult()))
-        cost = max(1, cost)
-        affordable = game.gold >= cost
-        bg = (34, 44, 40) if affordable else (32, 32, 36)
-        pygame.draw.rect(surf, bg, rect, border_radius=8)
-        border_col = COL_GREEN if affordable else (80, 80, 86)
-        pygame.draw.rect(surf, border_col, rect, 2, border_radius=8)
-
-        lbl = font_lbl.render(f"{UPGRADE_LABELS[aspect]}", True, COL_WHITE)
-        surf.blit(lbl, (rect.x + 10, rect.y + 6))
-
-        lvl_txt = font_val.render(f"nivel {pts}", True, COL_TEXT_DIM)
-        surf.blit(lvl_txt, (rect.x + 10, rect.y + 26))
-
-        cost_col = COL_GOLD if affordable else COL_TEXT_DIM
-        cost_txt = font_val.render(f"{cost}g" if affordable else f"{cost}g (sem ouro)", True, cost_col)
-        crect = cost_txt.get_rect()
-        crect.topright = (rect.right - 10, rect.y + 26)
-        surf.blit(cost_txt, crect)
-
-        # mostra o valor atual da stat correspondente
-        if aspect == "damage":
-            stat_txt = f"{tower.damage:0.0f} dmg"
-        elif aspect == "range":
-            stat_txt = f"{tower.range:0.0f} alcance"
-        else:
-            stat_txt = f"{1/tower.fire_rate:0.2f} tiros/s"
-        stxt = font_val.render(stat_txt, True, COL_TEXT_DIM)
-        srect = stxt.get_rect()
-        srect.topright = (rect.right - 10, rect.y + 6)
-        surf.blit(stxt, srect)
 
 
 def draw_meta_shop(game, surf):

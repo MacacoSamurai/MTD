@@ -13,13 +13,14 @@ from .config import (
     SKIP_WAVE_BASE_BONUS, SKIP_WAVE_BONUS_PER_WAVE,
     GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_COLS, GRID_ROWS, CELL_SIZE,
     CLICK_DRAG_THRESHOLD, COL_GOLD, COL_GEM, TOP_HUD_HEIGHT,
+    TOWER_PANEL_WIDTH, TOWER_PANEL_SLIDE_SPEED, TOWER_PANEL_DOUBLE_CLICK_MS,
 )
 from .paths import MapPath
 from .maps import DEFAULT_MAP_ID
 from .entities import Tower
 from .systems import WaveManager, MetaUpgrades
 from .fonts import get_font
-from .ui import hud, menus, board, map_menu, main_menu
+from .ui import hud, menus, board, map_menu, tower_panel
 
 
 class Game:
@@ -69,10 +70,17 @@ class Game:
         self.tower_cost = TOWER_BASE_COST  # sera recalculado abaixo
         self.total_kills = 0
         self.hovered_cell = None
-        self.shop_open_cell = None  # celula com menu de compra aberto
         self.skip_button_rect = None  # calculado no draw_hud, usado no clique
-        self.upgrade_open_cell = None  # celula com menu de melhorias aberto
         self.mouse_down_pos = None  # posicao do ultimo mousedown (p/ distinguir clique de drag)
+
+        # -- painel lateral de torres (compra + upgrade) --
+        self.tower_panel_open = True
+        # posicao x atual da borda esquerda do painel (anima entre aberto/fechado)
+        self.tower_panel_x = WIDTH - TOWER_PANEL_WIDTH
+        self.selected_tower_cell = None  # celula com upgrade aberto no painel
+        self.dragging_from_panel = None  # type_key sendo arrastado do painel, ou None
+        self.panel_click_pending = None  # (type_key, tempo_ms) do ultimo clique no card, p/ duplo-clique
+
         self.recalc_tower_cost()
 
     # ------------------------------------------------------------------
@@ -94,6 +102,33 @@ class Game:
         if 0 <= col < GRID_COLS and 0 <= row < GRID_ROWS:
             return int(col), int(row)
         return None
+
+    # ------------------------------------------------------------------
+    def first_empty_cell(self):
+        """Retorna a primeira celula (varrendo linha a linha) que nao
+        e caminho e nao tem torre, ou None se a grade estiver cheia."""
+        for row in range(GRID_ROWS):
+            for col in range(GRID_COLS):
+                cell = (col, row)
+                if cell in self.map_path.cell_set:
+                    continue
+                if cell not in self.towers:
+                    return cell
+        return None
+
+    def buy_tower_at(self, cell, ttype):
+        """Tenta comprar uma torre do tipo dado na celula dada. Retorna
+        True se a compra foi concluida (ouro descontado, torre criada)."""
+        if cell is None or cell in self.towers or cell in self.map_path.cell_set:
+            return False
+        if self.gold < self.tower_cost:
+            return False
+        self.gold -= self.tower_cost
+        start_level = 1 + int(self.meta.start_tower_level_bonus())
+        t = Tower(cell[0], cell[1], ttype=ttype, level=start_level)
+        self.towers[cell] = t
+        self.add_floating_text(*t.grid_pos(), f"-{self.tower_cost}g", COL_GOLD)
+        return True
 
     # ------------------------------------------------------------------
     def recalc_tower_cost(self):
@@ -118,18 +153,33 @@ class Game:
         self.add_floating_text(cx, cy, f"Onda pulada! +{bonus}g", COL_GOLD)
 
     # ------------------------------------------------------------------
+    def update_tower_panel_slide(self, dt):
+        """Anima a posicao x do painel deslizando entre aberto/fechado.
+        Fechado, o painel fica totalmente fora da tela (nao redimensiona
+        o grid); a abinha de abrir/fechar continua acessivel."""
+        target_x = WIDTH - TOWER_PANEL_WIDTH if self.tower_panel_open else WIDTH
+        step = TOWER_PANEL_SLIDE_SPEED * dt
+        if self.tower_panel_x < target_x:
+            self.tower_panel_x = min(target_x, self.tower_panel_x + step)
+        elif self.tower_panel_x > target_x:
+            self.tower_panel_x = max(target_x, self.tower_panel_x - step)
+
+    # ------------------------------------------------------------------
     # ENTRADA (mouse/teclado)
     # ------------------------------------------------------------------
-    def try_click_upgrade_menu(self, pos):
-        """Processa um clique quando o menu de upgrade esta aberto.
-        Retorna True se o clique foi consumido pelo menu (dentro do
-        painel), False se foi fora (o chamador deve fechar o menu)."""
-        cell = self.upgrade_open_cell
+    def toggle_tower_panel(self):
+        self.tower_panel_open = not self.tower_panel_open
+
+    def try_click_panel_upgrade(self, pos):
+        """Processa um clique quando o painel esta em modo upgrade
+        (uma torre do grid selecionada). Retorna True se o clique foi
+        consumido (dentro do painel)."""
+        cell = self.selected_tower_cell
         if cell not in self.towers:
             return False
-        rects, close_rect, panel_rect = menus.upgrade_menu_rects(self.towers, cell)
-        if close_rect.collidepoint(pos):
-            self.upgrade_open_cell = None
+        rects, back_rect = tower_panel.upgrade_button_rects(self.tower_panel_x)
+        if back_rect.collidepoint(pos):
+            self.selected_tower_cell = None
             return True
         tower = self.towers[cell]
         for rect, aspect in rects:
@@ -143,36 +193,57 @@ class Game:
                     from .config import UPGRADE_LABELS
                     self.add_floating_text(tx, ty - 24, f"{UPGRADE_LABELS[aspect]} ++", COL_MERGE_GLOW)
                 return True
-        if panel_rect.collidepoint(pos):
+        area = tower_panel.panel_area_rect()
+        area.x = self.tower_panel_x
+        if area.collidepoint(pos):
             return True  # clique dentro do painel mas fora de botoes: nao fecha
+        return False
+
+    def try_click_panel_shop(self, pos):
+        """Processa um clique quando o painel esta em modo loja.
+        Comeca um drag potencial no card clicado, ou (se for o segundo
+        clique rapido no mesmo card) compra direto na 1a celula vazia.
+        Retorna True se o clique foi consumido (dentro do painel)."""
+        for rect, ttype in tower_panel.shop_card_rects(self.tower_panel_x):
+            if rect.collidepoint(pos):
+                now = pygame.time.get_ticks()
+                pending = self.panel_click_pending
+                if pending is not None and pending[0] == ttype and \
+                        now - pending[1] <= TOWER_PANEL_DOUBLE_CLICK_MS:
+                    # 2o clique rapido no mesmo card: compra automatica
+                    self.panel_click_pending = None
+                    cell = self.first_empty_cell()
+                    if cell is not None:
+                        self.buy_tower_at(cell, ttype)
+                else:
+                    # 1o clique: registra e tambem inicia um drag potencial
+                    self.panel_click_pending = (ttype, now)
+                    self.dragging_from_panel = ttype
+                    self.mouse_down_pos = pos
+                return True
+        area = tower_panel.panel_area_rect()
+        area.x = self.tower_panel_x
+        if area.collidepoint(pos):
+            return True
         return False
 
     def handle_click_down(self, pos):
         if self.game_over:
             return
 
-        # se o menu de upgrade esta aberto, checa clique nos botoes dele
-        if self.upgrade_open_cell is not None:
-            handled = self.try_click_upgrade_menu(pos)
-            if handled:
-                return
-            self.upgrade_open_cell = None
+        # aba de abrir/fechar o painel
+        tab = tower_panel.toggle_tab_rect(self.tower_panel_x)
+        if tab.collidepoint(pos):
+            self.toggle_tower_panel()
+            return
 
-        # se o menu de compra esta aberto, primeiro checa clique nos botoes
-        if self.shop_open_cell is not None:
-            for rect, ttype in menus.shop_slot_rects(self.shop_open_cell):
-                if rect.collidepoint(pos):
-                    cell = self.shop_open_cell
-                    if self.gold >= self.tower_cost and cell not in self.towers:
-                        self.gold -= self.tower_cost
-                        start_level = 1 + int(self.meta.start_tower_level_bonus())
-                        t = Tower(cell[0], cell[1], ttype=ttype, level=start_level)
-                        self.towers[cell] = t
-                        self.add_floating_text(*t.grid_pos(), f"-{self.tower_cost}g", COL_GOLD)
-                    self.shop_open_cell = None
+        # painel aberto (ou animando pra fora): checa cliques nele primeiro
+        if self.tower_panel_x < WIDTH:
+            if self.selected_tower_cell is not None:
+                if self.try_click_panel_upgrade(pos):
                     return
-            # clicou fora dos botoes: fecha o menu (e processa clique normal)
-            self.shop_open_cell = None
+            elif self.try_click_panel_shop(pos):
+                return
 
         cell = self.cell_from_pixel(*pos)
         if cell is None:
@@ -180,26 +251,46 @@ class Game:
         if cell in self.towers:
             # comeca um "drag potencial": so vira arrasto de verdade se o
             # mouse se mover o suficiente antes de soltar (ver handle_click_up)
-            self.shop_open_cell = None
             self.dragging_tower = self.towers[cell]
             self.dragging_tower.being_dragged = True
             self.drag_origin = cell
             self.mouse_down_pos = pos
-        elif cell not in self.map_path.cell_set:
-            # abre menu de escolha de tipo de torre para essa celula
-            self.upgrade_open_cell = None
-            self.shop_open_cell = cell
+
+    def _pos_over_panel(self, pos):
+        """True se pos cair sobre a area visivel do painel ou sua aba
+        de abrir/fechar (que ficam na frente do grid); usado para nao
+        deixar soltar/arrastar uma torre numa celula escondida atras
+        do painel aberto."""
+        tab = tower_panel.toggle_tab_rect(self.tower_panel_x)
+        if tab.collidepoint(pos):
+            return True
+        if self.tower_panel_x >= WIDTH:
+            return False
+        area = tower_panel.panel_area_rect()
+        area.x = self.tower_panel_x
+        return area.collidepoint(pos)
 
     def handle_click_up(self, pos):
+        # soltar uma torre que estava sendo arrastada do painel (compra)
+        if self.dragging_from_panel is not None:
+            ttype = self.dragging_from_panel
+            self.dragging_from_panel = None
+            if not self._pos_over_panel(pos):
+                cell = self.cell_from_pixel(*pos)
+                self.buy_tower_at(cell, ttype)
+            return
+
         if self.dragging_tower is None:
             return
         cell = self.cell_from_pixel(*pos)
+        if cell is not None and self._pos_over_panel(pos):
+            cell = None  # soltar sobre o painel = cancela, nao move pra celula escondida
         origin = self.drag_origin
         tower = self.dragging_tower
         tower.being_dragged = False
 
         # se o mouse mal se moveu desde o clique inicial, trata como um
-        # CLIQUE (nao arrasto): abre o menu de melhorias daquela torre
+        # CLIQUE (nao arrasto): seleciona a torre no painel (modo upgrade)
         if self.mouse_down_pos is not None:
             dx = pos[0] - self.mouse_down_pos[0]
             dy = pos[1] - self.mouse_down_pos[1]
@@ -207,7 +298,8 @@ class Game:
                 self.dragging_tower = None
                 self.drag_origin = None
                 self.mouse_down_pos = None
-                self.upgrade_open_cell = origin
+                self.selected_tower_cell = origin
+                self.tower_panel_open = True
                 return
         self.mouse_down_pos = None
 
@@ -292,6 +384,7 @@ class Game:
         if self.state in ("map_select", "main_menu"):
             return
         self.hovered_cell = self.cell_from_pixel(*self.mouse_pos)
+        self.update_tower_panel_slide(dt)
 
         if self.game_over or self.paused:
             self.update_floating_texts(dt)
@@ -362,21 +455,20 @@ class Game:
 
         self.screen.fill(COL_BG)
         offset = (0, 0)
-        board.draw_grid(self, self.screen)
         board.draw_path(self.screen, offset, self.map_path)
 
         for e in self.enemies:
             e.draw(self.screen, offset)
 
+        for p in self.projectiles:
+            p.draw(self.screen, offset)
+
+        board.draw_grid(self, self.screen)
+
         # torres (nao-arrastadas primeiro)
         for cell, t in self.towers.items():
             if t is not self.dragging_tower:
                 t.draw(self.screen, None, False)
-
-        # projeteis: desenhados DEPOIS da grade e das torres para nao
-        # passarem "por baixo" delas visualmente (bug MTD-corretiva)
-        for p in self.projectiles:
-            p.draw(self.screen, offset)
 
         menus.draw_tower_range_hover(self, self.screen, offset)
 
@@ -400,8 +492,20 @@ class Game:
                     col = (120, 120, 130)
                 pygame.draw.rect(self.screen, col, rect.inflate(-4, -4), 3, border_radius=8)
 
-        menus.draw_shop_menu(self, self.screen)
-        menus.draw_upgrade_menu(self, self.screen)
+        # preview da celula alvo enquanto arrasta uma torre nova do painel
+        if self.dragging_from_panel is not None:
+            cell = self.hovered_cell
+            if cell is not None:
+                x = GRID_ORIGIN_X + cell[0] * CELL_SIZE
+                y = GRID_ORIGIN_Y + cell[1] * CELL_SIZE
+                rect = pygame.Rect(x, y, CELL_SIZE, CELL_SIZE)
+                valid = cell not in self.towers and cell not in self.map_path.cell_set
+                col = COL_MERGE_GLOW if valid else (200, 80, 80)
+                pygame.draw.rect(self.screen, col, rect.inflate(-4, -4), 3, border_radius=8)
+
+        tower_panel.draw_tower_panel(self, self.screen)
+        if self.dragging_from_panel is not None:
+            tower_panel.draw_dragged_card_ghost(self, self.screen)
 
         # floating texts
         font_ft = get_font(16, bold=True)
@@ -456,16 +560,17 @@ class Game:
                     elif event.key == pygame.K_g:
                         self.meta_shop_open = not self.meta_shop_open
                         # fecha outros menus pra nao sobrepor
-                        self.shop_open_cell = None
-                        self.upgrade_open_cell = None
+                        self.selected_tower_cell = None
+                    elif event.key == pygame.K_t:
+                        self.toggle_tower_panel()
                     elif event.key == pygame.K_r and self.game_over:
                         self.state = "map_select"
                     elif event.key == pygame.K_m:
                         # volta ao menu de mapas a qualquer momento
                         self.state = "map_select"
                         self.meta_shop_open = False
-                        self.shop_open_cell = None
-                        self.upgrade_open_cell = None
+                        self.selected_tower_cell = None
+                        self.dragging_from_panel = None
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:
                         if self.state == "main_menu":
@@ -493,8 +598,7 @@ class Game:
                             self.handle_meta_shop_click(event.pos)
                         elif self.gem_button_rect is not None and self.gem_button_rect.collidepoint(event.pos):
                             self.meta_shop_open = True
-                            self.shop_open_cell = None
-                            self.upgrade_open_cell = None
+                            self.selected_tower_cell = None
                         elif self.skip_button_rect is not None and self.skip_button_rect.collidepoint(event.pos):
                             self.skip_current_wave()
                         else:
