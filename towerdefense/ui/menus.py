@@ -21,6 +21,7 @@ from ..config import (
 from ..fonts import get_font
 from ..entities.tower import tower_color
 from .hud import draw_gem_icon
+from . import theme
 
 
 # ----------------------------------------------------------------------
@@ -85,18 +86,21 @@ def draw_tower_range_hover(game, surf, offset):
     if t.armor_pierce:
         lines.append("Ignora armadura")
     pad = 8
-    w = max(font.size(l)[0] for l in lines) + pad * 2
+    icon_w = 26
+    w = max(font.size(l)[0] for l in lines) + pad * 2 + icon_w
     h = 20 * len(lines) + pad
     tx = min(WIDTH - w - 10, gx + 20)
-    ty = max(10, gy - h - 20)
-    box = pygame.Surface((w, h), pygame.SRCALPHA)
-    pygame.draw.rect(box, (20, 24, 32, 235), (0, 0, w, h), border_radius=6)
-    pygame.draw.rect(box, (*color, 255), (0, 0, w, h), 2, border_radius=6)
+    # nunca deixar o tooltip nascer por baixo do HUD superior (torres da
+    # primeira fileira do grid ficam bem perto do topo da tela)
+    ty = max(TOP_HUD_HEIGHT + 6, gy - h - 20)
+    box_rect = pygame.Rect(tx, ty, w, h)
+    theme.draw_panel(surf, box_rect, (20, 24, 32), border=color, radius=6, border_w=2)
+    tower_shape = TOWER_TYPES[t.ttype]["tower_shape"]
+    theme.draw_shape_icon(surf, tx + pad + 10, ty + h // 2, 12, tower_shape, color)
     for i, line in enumerate(lines):
         fnt = font if i == 0 else font2
         t_surf = fnt.render(line, True, COL_WHITE if i == 0 else COL_TEXT_DIM)
-        box.blit(t_surf, (pad, pad // 2 + i * 20))
-    surf.blit(box, (tx, ty))
+        surf.blit(t_surf, (tx + pad + icon_w, ty + pad // 2 + i * 20))
 
 
 def draw_meta_shop(game, surf):
@@ -109,10 +113,7 @@ def draw_meta_shop(game, surf):
     overlay.fill((0, 0, 0, 165))
     surf.blit(overlay, (0, 0))
 
-    panel = pygame.Surface((panel_rect.w, panel_rect.h), pygame.SRCALPHA)
-    pygame.draw.rect(panel, (20, 24, 34, 250), (0, 0, panel_rect.w, panel_rect.h), border_radius=14)
-    pygame.draw.rect(panel, (*COL_GEM, 255), (0, 0, panel_rect.w, panel_rect.h), 3, border_radius=14)
-    surf.blit(panel, panel_rect.topleft)
+    theme.draw_panel(surf, panel_rect, (20, 24, 34), border=COL_GEM, radius=14, border_w=3)
 
     # cabecalho
     font_title = get_font(24, bold=True)
@@ -133,8 +134,9 @@ def draw_meta_shop(game, surf):
     surf.blit(sub_txt, srect)
 
     # botao fechar
-    pygame.draw.rect(surf, (60, 40, 40), close_rect, border_radius=6)
-    pygame.draw.rect(surf, COL_RED, close_rect, 1, border_radius=6)
+    close_hovered = close_rect.collidepoint(game.mouse_pos)
+    theme.draw_panel(surf, close_rect, (60, 40, 40) if not close_hovered else (90, 50, 50),
+                      border=COL_RED, radius=6, border_w=1, shadow=False)
     font_x = get_font(16, bold=True)
     x_txt = font_x.render("X", True, COL_WHITE)
     surf.blit(x_txt, x_txt.get_rect(center=close_rect.center))
@@ -150,11 +152,14 @@ def draw_meta_shop(game, surf):
         cost = game.meta.cost_for_next(key)
         maxed = cost is None
         affordable = (not maxed) and game.gems >= cost
+        hovered = rect.collidepoint(game.mouse_pos)
 
-        bg = (30, 40, 34) if affordable else (26, 28, 34)
-        pygame.draw.rect(surf, bg, rect, border_radius=10)
+        base_fill = (30, 40, 34) if affordable else (26, 28, 34)
+        if hovered and affordable:
+            base_fill = theme.shade(base_fill, 0.12)
         border_col = COL_GEM if affordable else ((90, 90, 60) if maxed else (70, 70, 78))
-        pygame.draw.rect(surf, border_col, rect, 2, border_radius=10)
+        theme.draw_panel(surf, rect, base_fill, border=border_col, radius=10,
+                          border_w=2 if not (hovered and affordable) else 3, shadow=False)
 
         draw_gem_icon(surf, rect.x + 20, rect.y + 22, 9)
 
@@ -175,7 +180,8 @@ def draw_meta_shop(game, surf):
         pygame.draw.rect(surf, (15, 18, 24), (bar_x, bar_y, bar_w, bar_h), border_radius=4)
         pct = lvl / max_lvl if max_lvl else 0
         if pct > 0:
-            pygame.draw.rect(surf, COL_GEM, (bar_x, bar_y, bar_w * pct, bar_h), border_radius=4)
+            fill_w = max(bar_h, bar_w * pct) if pct > 0 else 0
+            pygame.draw.rect(surf, COL_GEM, (bar_x, bar_y, fill_w, bar_h), border_radius=4)
 
         # custo / status
         if maxed:

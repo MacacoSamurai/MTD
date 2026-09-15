@@ -20,7 +20,7 @@ from .maps import DEFAULT_MAP_ID
 from .entities import Tower
 from .systems import WaveManager, MetaUpgrades
 from .fonts import get_font
-from .ui import hud, menus, board, map_menu, tower_panel
+from .ui import hud, menus, board, map_menu, main_menu, tower_panel
 
 
 class Game:
@@ -465,16 +465,27 @@ class Game:
 
         board.draw_grid(self, self.screen)
 
-        # torres (nao-arrastadas primeiro)
-        for cell, t in self.towers.items():
+        # torres (nao-arrastadas primeiro) -- desenhadas ordenadas por
+        # ROW (linha na grade), nao pela ordem de insercao no dict. Sem
+        # isso, uma torre "de tras" (row menor, mais pro topo da tela)
+        # colocada DEPOIS de uma "da frente" (row maior) desenhava por
+        # cima dela, sobrepondo errado (cano/corpo de tras cortando a
+        # torre da frente). Ordenando por row, quem esta mais embaixo na
+        # tela sempre fica visualmente na frente -- efeito "pintor" comum
+        # em jogos top-down como esse.
+        for cell, t in sorted(self.towers.items(), key=lambda item: item[1].row):
             if t is not self.dragging_tower:
                 t.draw(self.screen, None, False)
 
         menus.draw_tower_range_hover(self, self.screen, offset)
 
-        # torre sendo arrastada por cima de tudo
+        # torre sendo arrastada por cima de tudo -- o destaque da celula
+        # alvo (retangulo colorido indicando merge/troca) precisa ser
+        # desenhado ANTES da torre, senao ele fica por cima dela (a torre
+        # arrastada acabava parecendo "embaixo da grade" quando passava
+        # sobre a celula de destino, mesmo o comentario dizendo "por cima
+        # de tudo" -- a ordem do codigo nao batia com a intencao).
         if self.dragging_tower is not None:
-            self.dragging_tower.draw(self.screen, self.mouse_pos, True)
             cell = self.hovered_cell
             if cell is not None:
                 x = GRID_ORIGIN_X + cell[0] * CELL_SIZE
@@ -491,6 +502,7 @@ class Game:
                 else:
                     col = (120, 120, 130)
                 pygame.draw.rect(self.screen, col, rect.inflate(-4, -4), 3, border_radius=8)
+            self.dragging_tower.draw(self.screen, self.mouse_pos, True)
 
         # preview da celula alvo enquanto arrasta uma torre nova do painel
         if self.dragging_from_panel is not None:
@@ -516,7 +528,6 @@ class Game:
             self.screen.blit(surf, (x - surf.get_width() / 2, y))
 
         hud.draw_hud(self, self.screen)
-        hud.draw_legend(self.screen)
 
         # loja de gemas: por cima de absolutamente tudo, inclusive HUD
         menus.draw_meta_shop(self, self.screen)

@@ -16,6 +16,8 @@ As funcoes *_rects() calculam apenas geometria e sao reaproveitadas
 tanto para desenhar quanto para testar cliques em game.py.
 """
 
+import math
+
 import pygame
 
 from ..config import (
@@ -26,7 +28,8 @@ from ..config import (
     COL_GRID_BORDER,
 )
 from ..fonts import get_font
-from ..entities.tower import tower_color, tower_name
+from ..entities.tower import tower_color, tower_name, draw_tower_shape
+from . import theme
 
 
 # ----------------------------------------------------------------------
@@ -72,7 +75,11 @@ def upgrade_button_rects(panel_x):
     w = area.w - 24
     h = 56
     gap = 10
-    start_y = area.y + 12 + 30 + 44  # abaixo do botao voltar + cabecalho
+    # 70 (nao 44): o cabecalho agora desenha a torre de verdade (com cano),
+    # que e mais alta que o icone de forma generico antigo -- ver
+    # _draw_upgrade_mode. Se nao abrir esse espaco, o cano da sniper (o
+    # mais longo) entra por baixo do primeiro botao de melhoria.
+    start_y = area.y + 12 + 30 + 70  # abaixo do botao voltar + cabecalho
     aspects = ["damage", "range", "rate"]
     rects = []
     for i, aspect in enumerate(aspects):
@@ -93,11 +100,19 @@ def draw_tower_panel(game, surf):
         # totalmente fora da tela: nem desenha
         pass
     else:
-        # fundo do painel
+        # fundo do painel: leve degrade + sombra pra "flutuar" sobre o grid
+        theme.draw_shadow(surf, area, radius=10, offset=(-4, 0), alpha=110)
         bg = pygame.Surface((area.w, area.h), pygame.SRCALPHA)
-        pygame.draw.rect(bg, (*COL_PANEL, 240), (0, 0, area.w, area.h), border_radius=10)
-        pygame.draw.rect(bg, COL_GRID_BORDER, (0, 0, area.w, area.h), 2, border_radius=10)
+        mask = pygame.Surface((area.w, area.h), pygame.SRCALPHA)
+        pygame.draw.rect(mask, (255, 255, 255, 255), (0, 0, area.w, area.h), border_radius=10)
+        grad = pygame.Surface((area.w, area.h), pygame.SRCALPHA)
+        theme.vertical_gradient(grad, (0, 0, area.w, area.h),
+                                 theme.shade(COL_PANEL, 0.08), theme.shade(COL_PANEL, -0.12))
+        grad.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        bg.blit(grad, (0, 0))
+        bg.set_alpha(245)
         surf.blit(bg, area.topleft)
+        pygame.draw.rect(surf, COL_GRID_BORDER, area, 2, border_radius=10)
 
         if game.selected_tower_cell is not None and game.selected_tower_cell in game.towers:
             _draw_upgrade_mode(game, surf, panel_x)
@@ -106,12 +121,23 @@ def draw_tower_panel(game, surf):
 
     # aba de abrir/fechar (sempre desenhada, mesmo com painel fora da tela)
     tab = toggle_tab_rect(panel_x)
-    pygame.draw.rect(surf, COL_PANEL, tab, border_radius=6)
-    pygame.draw.rect(surf, COL_GRID_BORDER, tab, 2, border_radius=6)
-    font_arrow = get_font(16, bold=True)
-    arrow = "\u25b6" if game.tower_panel_open else "\u25c0"
-    txt = font_arrow.render(arrow, True, COL_WHITE)
-    surf.blit(txt, txt.get_rect(center=tab.center))
+    hovered_tab = tab.collidepoint(game.mouse_pos)
+    tab_fill = theme.shade(COL_PANEL, 0.1) if hovered_tab else COL_PANEL
+    theme.draw_panel(surf, tab, tab_fill, border=COL_GOLD if hovered_tab else COL_GRID_BORDER,
+                      radius=6, shadow=True)
+    # seta desenhada como triangulo (poligono), NAO como glifo de fonte
+    # ("\u25b6"/"\u25c0"): SysFont("arial") nem sempre tem esse glifo em
+    # todo sistema/instalacao (no Linux costuma cair pra uma fonte de
+    # fallback sem ele), e ai o botao ficava com um quadradinho vazio ou
+    # nada desenhado -- um triangulo manual sempre aparece, em qualquer
+    # maquina.
+    cx, cy = tab.center
+    s = 6
+    if game.tower_panel_open:  # aponta pra direita (fecha o painel)
+        points = [(cx - s, cy - s), (cx - s, cy + s), (cx + s, cy)]
+    else:  # aponta pra esquerda (abre o painel)
+        points = [(cx + s, cy - s), (cx + s, cy + s), (cx - s, cy)]
+    pygame.draw.polygon(surf, COL_WHITE, points)
 
 
 def _draw_shop_mode(game, surf, panel_x):
@@ -119,19 +145,32 @@ def _draw_shop_mode(game, surf, panel_x):
     font_desc = get_font(11)
     font_cost = get_font(13, bold=True)
 
+    # nivel com que a torre nasce ao ser comprada agora (pode ser > 1 com
+    # a melhoria permanente de gemas "start_tower_level_bonus") -- o card
+    # mostra a torre de verdade nesse nivel, entao acompanha essa melhoria
+    # tambem, nao so a aparencia por tipo.
+    start_level = 1 + int(game.meta.start_tower_level_bonus())
+
     for rect, ttype in shop_card_rects(panel_x):
         if game.dragging_from_panel == ttype:
             continue  # esta sendo desenhada seguindo o mouse, nao aqui
         spec = TOWER_TYPES[ttype]
         color = spec["base_color"]
         affordable = game.gold >= game.tower_cost
+        hovered = rect.collidepoint(game.mouse_pos)
 
-        bg = (34, 40, 52) if affordable else (28, 28, 32)
-        pygame.draw.rect(surf, bg, rect, border_radius=8)
-        pygame.draw.rect(surf, color, rect, 2, border_radius=8)
+        base_fill = theme.shade(color, -0.82) if affordable else (28, 28, 32)
+        if hovered and affordable:
+            base_fill = theme.shade(color, -0.72)
+        theme.draw_panel(surf, rect, base_fill, border=color if affordable else (70, 70, 76),
+                          radius=8, border_w=2 if not hovered else 3, shadow=False)
 
-        pygame.draw.circle(surf, color, (rect.x + 22, rect.y + 24), 13)
-        pygame.draw.circle(surf, (0, 0, 0), (rect.x + 22, rect.y + 24), 13, 2)
+        # torre de verdade em miniatura (nao um icone generico da forma):
+        # usa o mesmo desenho de Tower.draw, entao qualquer mudanca futura
+        # na aparencia da torre aparece aqui automaticamente. Radius menor
+        # so pra caber no card; sem alvo -> pose neutra (cano pra cima).
+        draw_tower_shape(surf, rect.x + 28, rect.y + 30, ttype, start_level,
+                          radius=15, show_level=False)
 
         lbl = font_lbl.render(spec["label"], True, COL_WHITE if affordable else COL_TEXT_DIM)
         surf.blit(lbl, (rect.x + 44, rect.y + 12))
@@ -173,21 +212,30 @@ def _draw_upgrade_mode(game, surf, panel_x):
     area.x = panel_x
 
     # botao "voltar" (fecha o modo upgrade, volta pra loja)
-    pygame.draw.rect(surf, (44, 40, 40), back_rect, border_radius=6)
-    pygame.draw.rect(surf, COL_RED, back_rect, 1, border_radius=6)
+    back_hovered = back_rect.collidepoint(game.mouse_pos)
+    theme.draw_panel(surf, back_rect, (44, 32, 32) if not back_hovered else (60, 38, 38),
+                      border=COL_RED, radius=6, shadow=False)
     font_back = get_font(13, bold=True)
     back_txt = font_back.render("< Voltar", True, COL_WHITE)
     surf.blit(back_txt, back_txt.get_rect(center=back_rect.center))
 
-    # cabecalho: tipo + nivel
+    # cabecalho: torre de verdade (nao icone generico da forma) + tipo + nivel.
+    # O cano aponta pra BAIXO (angle=pi/2) de proposito: e a direcao com
+    # mais espaco livre aqui (entre o cabecalho e os botoes de melhoria),
+    # sem disputar espaco com o botao "Voltar" acima nem com o texto ao
+    # lado -- ver o "70" em upgrade_button_rects, calculado pra caber ate
+    # o cano mais longo (sniper).
     color = tower_color(tower.level)
+    spec = TOWER_TYPES[tower.ttype]
+    icon_cy = back_rect.bottom + 26
+    draw_tower_shape(surf, area.x + 26, icon_cy, tower.ttype, tower.level,
+                      angle=math.pi / 2, radius=14, show_level=False)
     font_h = get_font(15, bold=True)
-    label = TOWER_TYPES[tower.ttype]["label"]
-    header = font_h.render(f"{label}", True, COL_WHITE)
-    surf.blit(header, (area.x + 12, back_rect.bottom + 10))
+    header = font_h.render(spec["label"], True, COL_WHITE)
+    surf.blit(header, (area.x + 54, back_rect.bottom + 10))
     font_sub = get_font(12)
     sub = font_sub.render(f"{tower_name(tower.level)} (Nv.{tower.level})", True, color)
-    surf.blit(sub, (area.x + 12, back_rect.bottom + 30))
+    surf.blit(sub, (area.x + 54, back_rect.bottom + 30))
 
     font_lbl = get_font(13, bold=True)
     font_val = get_font(11)
@@ -196,10 +244,14 @@ def _draw_upgrade_mode(game, surf, panel_x):
         cost = int(round(tower.upgrade_cost(aspect) * game.meta.upgrade_cost_mult()))
         cost = max(1, cost)
         affordable = game.gold >= cost
-        bg = (34, 44, 40) if affordable else (30, 30, 34)
-        pygame.draw.rect(surf, bg, rect, border_radius=8)
+        hovered = rect.collidepoint(game.mouse_pos)
+
+        base_fill = (30, 40, 34) if affordable else (30, 30, 34)
+        if hovered and affordable:
+            base_fill = theme.shade(base_fill, 0.15)
         border_col = COL_GREEN if affordable else (80, 80, 86)
-        pygame.draw.rect(surf, border_col, rect, 2, border_radius=8)
+        theme.draw_panel(surf, rect, base_fill, border=border_col, radius=8,
+                          border_w=2 if not hovered else 3, shadow=False)
 
         lbl = font_lbl.render(UPGRADE_LABELS[aspect], True, COL_WHITE)
         surf.blit(lbl, (rect.x + 10, rect.y + 6))
@@ -225,16 +277,14 @@ def _draw_upgrade_mode(game, surf, panel_x):
 
 
 def draw_dragged_card_ghost(game, surf):
-    """Enquanto uma torre esta sendo arrastada do painel, desenha um
-    circulo fantasma seguindo o mouse (o alcance/preview real da
-    torre ja e desenhado por menus.draw_tower_range_hover-like logic
-    em game.py, aqui e so o icone)."""
+    """Enquanto uma torre esta sendo arrastada do painel, desenha a torre
+    de verdade (nao um icone generico da forma) seguindo o mouse -- o
+    alcance/preview real da torre ja e desenhado por
+    menus.draw_tower_range_hover-like logic em game.py, aqui e so o
+    corpo da torre, no mesmo nivel com que ela vai nascer ao ser solta."""
     ttype = game.dragging_from_panel
     if ttype is None:
         return
-    spec = TOWER_TYPES[ttype]
-    color = spec["base_color"]
+    start_level = 1 + int(game.meta.start_tower_level_bonus())
     mx, my = game.mouse_pos
-    pygame.draw.circle(surf, (30, 30, 36), (mx, my), 24)
-    pygame.draw.circle(surf, color, (mx, my), 20)
-    pygame.draw.circle(surf, (0, 0, 0), (mx, my), 20, 2)
+    draw_tower_shape(surf, mx, my, ttype, start_level, show_level=False)
