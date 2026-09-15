@@ -38,7 +38,7 @@ PANEL_WIDTH = WIDTH  # mantido por compatibilidade com HUD que usa toda a largur
 # Fica sobreposto na frente do grid (nao redimensiona a area de jogo).
 # Pode abrir/fechar deslizando; quando fechado fica totalmente fora da tela.
 # ----------------------------------------------------------------------------
-TOWER_PANEL_WIDTH = 230
+TOWER_PANEL_WIDTH = 300
 TOWER_PANEL_CARD_H = 96
 TOWER_PANEL_CARD_GAP = 10
 TOWER_PANEL_SLIDE_SPEED = 1900  # px/s da animacao de abrir/fechar
@@ -53,15 +53,25 @@ TOWER_BASE_COST = 60
 SKIP_WAVE_BASE_BONUS = 40   # ouro extra ganho ao pular a onda
 SKIP_WAVE_BONUS_PER_WAVE = 6  # cresce um pouco a cada onda
 
-# Melhorias especificas de torre (menu de upgrade por clique).
-# Cada ponto aplica um incremento percentual sobre a stat ja calculada
-# pelo nivel/merge. O custo de cada ponto cresce exponencialmente.
-UPGRADE_DAMAGE_PCT = 0.18   # +18% de dano por ponto
-UPGRADE_RANGE_PCT = 0.08    # +8% de alcance por ponto
-UPGRADE_RATE_PCT = 0.10     # -10% no intervalo entre tiros por ponto
-UPGRADE_BASE_COST = {"damage": 35, "range": 25, "rate": 40}
-UPGRADE_LABELS = {"damage": "Dano", "range": "Alcance", "rate": "Cadencia"}
+# As melhorias por torre NAO sao mais tres barrinhas genericas de
+# dano/alcance/cadencia: viraram a arvore de 3 caminhos x 6 tiers
+# (estilo Bloons TD 6) que vive em `towerdefense/upgrades.py` -- e la
+# que ficam nomes, descricoes, efeitos e custos de cada upgrade.
 CLICK_DRAG_THRESHOLD = 8  # pixels; abaixo disso, soltar o mouse conta como clique
+
+# --- parametros de combate usados pela arvore de upgrades ---
+# intervalo entre os tiros extras de uma rajada (mod `burst_add`)
+BURST_INTERVAL = 0.09
+# abertura (radianos) entre projeteis de um mesmo ataque multiplo
+SHOT_SPREAD = 0.10
+# de quanto em quanto tempo uma aura (Permafrost, Era Glacial...) pulsa
+AURA_PULSE_INTERVAL = 0.25
+# a partir de quanta armadura um inimigo conta como "pesado" para os
+# bonus anti-colosso (bosses sempre contam, independente da armadura)
+HEAVY_ENEMY_ARMOR = 8
+# chance de um inimigo esquivo/camuflado ignorar um acerto de uma torre
+# SEM deteccao (ver "Visao Tatica", caminho Observador da sniper)
+EVASION_CHANCE = 0.35
 
 BOSS_WAVE_INTERVAL = 10  # a cada quantas ondas surge um boss
 BOSS_HP_SCALE_PER_CYCLE = 0.55  # bosses ficam mais fortes a cada ciclo de 10 ondas
@@ -185,8 +195,11 @@ ENEMY_TYPES = {
         "gold": 30, "shape": "square", "min_wave": 7, "armor": 8,
     },
     "phantom": {
+        # "camuflado": tem chance de ignorar acertos de torres sem
+        # deteccao (ver EVASION_CHANCE e o caminho Observador da sniper)
         "color": (170, 230, 255), "radius": 11, "speed": 85, "hp": 70,
         "gold": 14, "shape": "diamond", "min_wave": 6, "armor": 2,
+        "evasive": True,
     },
     "titan": {
         "color": (255, 80, 80), "radius": 28, "speed": 26, "hp": 900,
@@ -249,7 +262,7 @@ META_UPGRADE_DEFS = {
     },
     "upgrade_discount": {
         "label": "Desconto em Melhorias",
-        "desc": "Reduz o custo das melhorias de dano/alcance/cadencia das torres.",
+        "desc": "Reduz o custo dos upgrades de caminho das torres.",
         "icon_color": (220, 140, 255),
         "base_cost": 3, "cost_step": 2,
         "effect_per_level": 0.08,  # -8% de custo por nivel

@@ -53,8 +53,11 @@ jogo, pois nao ha persistencia em disco).
 
 ```
 main.py                     # so cria Game() e chama .run()
+smoke_test.py               # validacao headless (ver secao "Teste" abaixo)
 towerdefense/
 ├── config.py                # TODAS as constantes/tabelas de balanceamento
+├── upgrades.py               # ARVORE de evolucao: 5 torres x 3 caminhos x 6 tiers
+│                              # (dados + regras puras de crosspath, sem pygame)
 ├── fonts.py                  # cache de pygame.font.SysFont por (tamanho, bold)
 ├── paths.py                  # MapPath: converte celulas (col,row) do mapa em
 │                              # posicoes de pixel + comprimento do percurso
@@ -65,6 +68,10 @@ towerdefense/
 │   ├── projectile.py          # Projectile: viaja ate o alvo, aplica dano/splash/slow
 │   └── tower.py               # Tower: stats por nivel, merge, upgrades, desenho
 ├── systems/
+│   ├── combat.py               # resolucao CENTRAL de dano/efeitos (todo dano do
+│   │                            # jogo passa por aqui: tiro, explosao, habilidade)
+│   ├── abilities.py            # habilidades tier 6 + IA que decide quando ativar
+│   ├── vfx.py                  # explosoes/campos/feixes descartaveis (so desenho)
 │   ├── waves.py                # WaveManager: fila de spawn, dificuldade crescente,
 │   │                            # bosses periodicos, skip_wave() (empilha ondas)
 │   └── meta_upgrades.py        # MetaUpgrades: niveis/custo/efeito da loja de gemas
@@ -115,14 +122,55 @@ Se for adicionar um menu/tela nova, siga esse padrao (veja
   descarta os inimigos restantes; a fila da proxima onda e intercalada
   com o que sobrou, entao mais inimigos aparecem juntos (ver comentario
   longo em `systems/waves.py`).
+- **Arvore de upgrades (`upgrades.py`) x merge sao progressoes
+  SEPARADAS**: `Tower.level` vem do merge e escala as stats de forma
+  generica; `Tower.tiers` (3 inteiros 0..6) vem da arvore e e o que da
+  identidade a torre (efeitos, padrao de tiro, aura, habilidade). Uma
+  torre 5-2-0 nivel 4 e "nivel 4 com os mods dos 7 upgrades comprados".
+  Os mods sao combinados por `upgrades.combine_mods` (o SUFIXO da chave
+  define como: `_mult` multiplica, `_add` soma, `_time`/`_amp` pegam o
+  maior, `slow_factor` pega o menor) e viram valores absolutos em
+  `Tower.build_effects()`.
+- **Adicionar um efeito novo na arvore**: escolha um nome de chave com
+  um desses sufixos, use no `mods` de algum tier em `upgrades.py`, e leia
+  `tower.mods[...]`/`tower.effects[...]` em `entities/tower.py`. Nao
+  espalhe `if` por upgrade especifico -- a combinacao e mecanica.
+- **`Game` e o "world"**: entities/ e systems/ NUNCA importam `Game`;
+  recebem um objeto com `.enemies`, `.projectiles`, `.vfx`,
+  `.pending_blasts`, `.towers` e `.map_path` (na pratica, o `Game`).
+  Se adicionar uma lista nova que projeteis/habilidades escrevem, ela
+  precisa nascer em `Game.reset()`.
+- **Todo dano passa por `systems/combat.py`**: `resolve_hit`,
+  `area_damage` e `explode`. Sem isso, projetil, explosao secundaria e
+  habilidade divergiriam na primeira mudanca de balanceamento. A ordem
+  das contas (esquiva -> critico -> bonus situacionais -> quebra de
+  armadura -> dano -> status) e parte do balanceamento.
+- **Regras de tier 6 moram em dois lugares, de proposito**: o crosspath
+  (regra local da torre) em `upgrades.can_upgrade`; o limite de UM tier 6
+  por TIPO de torre (regra da partida inteira) em `Game.tier6_owner` /
+  `Game.path_purchase_state`. Desenho do painel e tratamento de clique
+  chamam o MESMO `path_purchase_state`, entao nunca aparece um botao
+  habilitado que recusa a compra.
+- **Habilidades tier 6 sao automaticas**: `AbilityController` varre
+  `world.towers` todo frame; quando o cooldown zera, a `evaluate` da
+  habilidade decide se a situacao vale (concentracao de inimigos, chefe
+  presente, vazamento iminente). Existe um mecanismo de PACIENCIA
+  (`_impatient`): se a habilidade esta pronta ha tempo demais, ela
+  dispara mesmo fora do cenario ideal -- sem ele, uma habilidade
+  anti-chefe podia ficar calada por ondas inteiras. A avaliacao e
+  throttled (`ABILITY_EVAL_INTERVAL`) porque `best_cluster` e O(n^2).
+- **Efeitos globais de habilidade** (DOMINIO ETERNO, VISAO ABSOLUTA)
+  ficam em `Enemy.global_amp`/`Enemy.global_slow`, atributos de CLASSE,
+  recalculados do zero a cada frame pelo controller (assim nunca sobra
+  efeito ligado) e zerados em `Game.reset()`.
 - **Merge so ocorre com mesmo nivel**: arrastar uma torre sobre outra do
   mesmo tipo so funde (`level += 1`) quando as duas tem exatamente o
   mesmo `level`. Nesse caso, cada aspecto de melhoria comprado no menu
-  (`upgrades["damage"|"range"|"rate"]`) fica com o MAIOR valor entre as
-  duas torres — nunca ha perda de melhoria ao fundir. Se os niveis forem
-  diferentes, o merge e proibido: as torres apenas trocam de lugar na
-  grade (cada uma mantem seu proprio nivel e upgrades). Ver
-  `Game.handle_click_up` em `game.py`. O indicador visual de arrasto
+  CAMINHO da arvore (`tiers`) fica com o MAIOR tier entre as duas torres
+  — nunca ha perda de investimento ao fundir. O merge tambem e proibido
+  se o resultado violar o crosspath (ex.: 5-0-0 + 0-5-0 daria 5-5-0);
+  nesse caso, como quando os niveis sao diferentes, as torres apenas
+  trocam de lugar na grade. Ver `Game.handle_click_up` em `game.py`. O indicador visual de arrasto
   usa `COL_MERGE_GLOW` (fusao valida) vs `COL_SWAP_GLOW` (mesmo tipo,
   nivel diferente -> so troca) vs cinza (tipos incompativeis).
 - **Cores/nomes de nivel de torre nao tem teto**: `tower_color()` e
@@ -136,11 +184,14 @@ Se for adicionar um menu/tela nova, siga esse padrao (veja
   fica centralizado em `config.py` (`TOWER_TYPES`, `ENEMY_TYPES`,
   `META_UPGRADE_DEFS`) — o resto do codigo itera sobre essas tabelas,
   entao normalmente não é preciso tocar em `game.py` ou `ui/`.
-- **Sem testes automatizados e sem persistencia em disco** neste
-  projeto. Validar mudancas manualmente rodando o jogo (ou, sem
-  display disponivel, com `SDL_VIDEODRIVER=dummy python main.py` /
-  chamando `Game()` e `.draw()` direto num script, como foi feito para
-  validar o menu principal).
+- **Sem pytest e sem persistencia em disco**, mas existe
+  `smoke_test.py` na raiz: script headless que valida crosspath,
+  integridade das 90 evolucoes, limite de tier 6 por tipo, merge ilegal
+  e roda 90 segundos de partida real (update + draw). Rodar
+  `python smoke_test.py` depois de mexer em torres/upgrades/combate. Pro
+  resto, validar na mao rodando o jogo (ou `SDL_VIDEODRIVER=dummy` +
+  `pygame.image.save(g.screen, ...)` pra inspecionar telas sem display,
+  como foi feito pra conferir o painel da arvore).
 - **`HEIGHT` e derivado da grade, nao um numero solto**: `HEIGHT =
   TOP_HUD_HEIGHT + GRID_ROWS * CELL_SIZE + BOTTOM_HUD_HEIGHT` em
   `config.py`. Ja existiu um bug em que `HEIGHT` fixo (800) era 8px
@@ -163,6 +214,10 @@ Se for adicionar um menu/tela nova, siga esse padrao (veja
   o que quebrava o jogo assim que abria (estado inicial e
   `"main_menu"`). Ao criar um modulo de ui/ novo, adicione-o em ambos
   os lugares.
+- **O painel "Como Jogar" tem altura DERIVADA do texto**
+  (`main_menu.HELP_SECTIONS` + `_help_content_height`): com altura fixa,
+  o conteudo vazava por baixo da borda assim que o texto crescia. Ao
+  adicionar uma secao la, nada mais precisa ser ajustado.
 - **Paineis/HUD usam `ui/theme.py` para consistencia visual**: sombra
   suave (`draw_shadow`), painel arredondado com leve degrade
   (`draw_panel`), gradiente vertical (`vertical_gradient`) e um botao

@@ -1,15 +1,19 @@
 """Torres: helpers de nivel (cor/nome), a classe Tower e seu merge/upgrade."""
 
 import math
+import random
+
 import pygame
 
 from ..config import (
     TOWER_TYPES, TOWER_LEVEL_COLORS, TOWER_LEVEL_NAMES,
-    GRID_ORIGIN_X, GRID_ORIGIN_Y, CELL_SIZE,
-    UPGRADE_DAMAGE_PCT, UPGRADE_RANGE_PCT, UPGRADE_RATE_PCT, UPGRADE_BASE_COST,
-    COL_MERGE_GLOW,
+    GRID_ORIGIN_X, GRID_ORIGIN_Y, CELL_SIZE, COL_MERGE_GLOW,
+    AURA_PULSE_INTERVAL, BURST_INTERVAL, SHOT_SPREAD,
 )
 from ..fonts import get_font
+from .. import upgrades as up
+from ..systems import combat
+from ..systems.vfx import Field
 from .projectile import Projectile
 
 
@@ -28,6 +32,37 @@ def tower_name(level):
     if level - 1 < len(TOWER_LEVEL_NAMES):
         return TOWER_LEVEL_NAMES[level - 1]
     return f"Ascendido +{level - len(TOWER_LEVEL_NAMES)}"
+
+
+def path_tinted_color(level, ttype, tiers):
+    """Cor da torre considerando a ESPECIALIZACAO, nao so o nivel de merge.
+
+    Uma torre sem upgrades continua com a cor do nivel (como antes). A
+    partir do tier 1 a cor vai sendo puxada para a cor do caminho
+    principal, ficando praticamente pura no tier 6 -- assim da pra bater
+    o olho no mapa e saber em que caminho cada torre foi especializada,
+    que e a informacao que mais importa depois que a arvore existe.
+    """
+    base = tower_color(level)
+    if tiers is None:
+        return base
+    mp = up.main_path(tiers)
+    if mp is None:
+        return base
+    target = up.PATH_COLORS[ttype][mp]
+    t = min(1.0, 0.16 + 0.15 * tiers[mp])
+    return tuple(int(base[i] + (target[i] - base[i]) * t) for i in range(3))
+
+
+def spec_name(ttype, tiers):
+    """Nome de exibicao da especializacao: nome do tier mais alto comprado
+    (ex.: "Canhao Demolidor"), ou None se a torre ainda e basica."""
+    if tiers is None:
+        return None
+    mp = up.main_path(tiers)
+    if mp is None:
+        return None
+    return up.tier_def(ttype, mp, tiers[mp])["name"]
 
 
 def _shade(color, amount):
@@ -217,7 +252,8 @@ def _barrel_points(cx, cy, ang, radius, shape, spec):
     ]
 
 
-def draw_tower_shape(surf, cx, cy, ttype, level=1, angle=None, radius=None, show_level=False):
+def draw_tower_shape(surf, cx, cy, ttype, level=1, angle=None, radius=None,
+                      show_level=False, tiers=None):
     """Desenha o visual "de verdade" de uma torre (base + corpo + cano +
     placa de nivel opcional) num ponto qualquer da tela, sem nenhuma logica
     de mira/alvo, arrasto ou indicador de alcance.
@@ -237,10 +273,22 @@ def draw_tower_shape(surf, cx, cy, ttype, level=1, angle=None, radius=None, show
     (util pra icones pequenos de UI); se omitido, usa o mesmo calculo de
     tamanho por nivel/tipo do jogo de verdade."""
     cx, cy = int(cx), int(cy)
-    color = tower_color(level)
+    color = path_tinted_color(level, ttype, tiers)
     if radius is None:
         radius = (19 + min(level, 10) * 1.1) * _SIZE_SCALE.get(ttype, _DEFAULT_SIZE_SCALE)
+    # torres especializadas ficam um pouco maiores conforme sobem de tier
+    # (a tier 6 e visivelmente "a super torre" da partida)
+    if tiers is not None and max(tiers) > 0:
+        radius *= 1.0 + 0.035 * max(tiers) + 0.012 * sum(tiers)
     outline = _shade(color, -0.6)
+
+    # anel dourado pulsante marcando uma torre tier 6
+    if tiers is not None and max(tiers) >= up.MAX_TIER:
+        halo = pygame.Surface((int(radius * 3), int(radius * 3)), pygame.SRCALPHA)
+        hc = (int(radius * 1.5), int(radius * 1.5))
+        pygame.draw.circle(halo, (255, 225, 120, 55), hc, int(radius * 1.45))
+        pygame.draw.circle(halo, (255, 225, 120, 170), hc, int(radius * 1.35), 3)
+        surf.blit(halo, (cx - radius * 1.5, cy - radius * 1.5))
 
     ang = angle if angle is not None else _NEUTRAL_ANGLE
     body_rotation = ang - _NEUTRAL_ANGLE
@@ -272,19 +320,49 @@ def draw_tower_shape(surf, cx, cy, ttype, level=1, angle=None, radius=None, show
 
 
 class Tower:
-    def __init__(self, col, row, ttype="canhao", level=1):
+    """Uma torre no grid.
+
+    Duas progressoes convivem e sao INDEPENDENTES:
+
+    - `level` -- vem do MERGE (arrastar uma torre sobre outra igual).
+      Escala as stats base de forma generica e nao tem teto.
+    - `tiers` -- os tres caminhos da arvore de upgrades (ver
+      `towerdefense/upgrades.py`), comprados com ouro no painel lateral.
+      E o que da IDENTIDADE a torre: efeitos, comportamento de tiro,
+      auras e (no tier 6) uma habilidade automatica.
+
+    O merge multiplica; a arvore especializa. Uma torre 5-2-0 de nivel 4
+    e uma torre de nivel 4 com os mods dos 7 upgrades comprados.
+    """
+
+    def __init__(self, col, row, ttype="canhao", level=1, tiers=None):
         self.col = col
         self.row = row
         self.ttype = ttype
         self.level = level
+        self.tiers = list(tiers) if tiers else [0, 0, 0]
         self.cooldown = 0.0
         self.target = None
-        self.upgrades = {"damage": 0, "range": 0, "rate": 0}
+        # rajada: tiros extras do MESMO ataque, disparados com um
+        # intervalinho entre si (mod `burst_add`)
+        self.pending_burst = 0
+        self.burst_timer = 0.0
+        self.aura_timer = 0.0
+        self.elemental_index = 0
+        # habilidade tier 6 (gerida por systems/abilities.py)
+        self.ability_cd = 0.0
+        self.ability_active = 0.0
+        self.ability_ready_for = 0.0  # ha quanto tempo esta pronta e a IA segura
+        self.ability_tick = 0.0
+        self.ability_eval_timer = 0.0
         self.recalc_stats()
         # posicao visual (para animacao de drag)
         self.drag_offset = (0, 0)
         self.being_dragged = False
 
+    # ------------------------------------------------------------------
+    # STATS
+    # ------------------------------------------------------------------
     def recalc_stats(self):
         spec = TOWER_TYPES[self.ttype]
         lvl = self.level
@@ -292,77 +370,274 @@ class Tower:
         self.range = spec["base_range"] + (lvl - 1) * 14
         self.damage = spec["base_damage"] * growth
         self.fire_rate = max(0.10, spec["base_rate"] - (lvl - 1) * 0.03)
-        self.splash = 0
-        self.slow = spec.get("always_slow")
+        self.splash = 0.0
         sfl = spec["splash_from_lvl"]
         if sfl is not None and lvl >= sfl:
             self.splash = spec["splash_base"] + (lvl - sfl) * spec["splash_step"]
-        # niveis muito altos (alem do merge normal) tambem ganham lentidao,
-        # mesmo em tipos que nao tem isso de base
-        if lvl >= 6 and self.slow is None:
-            self.slow = (0.6, 1.0)
         self.armor_pierce = spec.get("armor_pierce", False)
+        self.proj_speed = spec["proj_speed"]
 
-        # aplica as melhorias especificas compradas no menu de upgrades
-        # (independentes do merge/nivel). Cada ponto de upgrade da um
-        # incremento percentual sobre a stat base ja calculada acima.
-        dmg_pts = self.upgrades["damage"]
-        rng_pts = self.upgrades["range"]
-        rate_pts = self.upgrades["rate"]
-        self.damage *= (1 + UPGRADE_DAMAGE_PCT * dmg_pts)
-        self.range *= (1 + UPGRADE_RANGE_PCT * rng_pts)
-        self.fire_rate = max(0.05, self.fire_rate * (1 - UPGRADE_RATE_PCT * rate_pts))
+        # --- mods da arvore de upgrades ---
+        self.mods = up.mods_for(self.ttype, self.tiers)
+        m = self.mods
+        self.damage *= m.get("damage_mult", 1.0)
+        self.range *= m.get("range_mult", 1.0)
+        self.fire_rate = max(0.04, self.fire_rate * m.get("rate_mult", 1.0))
+        self.splash = (self.splash + m.get("splash_add", 0.0)) * m.get("splash_mult", 1.0)
+        self.proj_speed *= m.get("proj_speed_mult", 1.0)
+        if m.get("armor_pierce", False):
+            self.armor_pierce = True
+        self.shots = 1 + int(m.get("shots_add", 0))
+        self.burst = 1 + int(m.get("burst_add", 0))
+        self.aura_radius = self.range * m.get("aura_radius_mult", 0.0)
+        self.effects = self.build_effects()
+        # compatibilidade com a UI antiga de tooltip (menus.draw_tower_range_hover)
+        self.slow = self.effects.get("slow")
 
-    def upgrade_cost(self, aspect):
-        """Custo em ouro para comprar o proximo ponto de melhoria daquele
-        aspecto ('damage', 'range' ou 'rate'). Cresce a cada compra e
-        tambem fica mais caro em torres de nivel mais alto."""
-        pts = self.upgrades[aspect]
-        base = UPGRADE_BASE_COST[aspect]
-        return int(base * (1.6 ** pts) * (1 + 0.12 * (self.level - 1)))
+    def build_effects(self):
+        """Traduz os `mods` (percentuais/fracoes) no dicionario de efeitos
+        com valores ABSOLUTOS que `systems/combat.py` consome. Fracoes de
+        dano-por-segundo viram dps de verdade aqui, entao combat.py nunca
+        precisa saber quanto a torre bate."""
+        m = self.mods
+        d = self.damage
+        spec = TOWER_TYPES[self.ttype]
+        eff = {
+            "splash": self.splash,
+            "pierce": int(m.get("pierce_add", 0)),
+            "ricochet": int(m.get("ricochet", 0)),
+            "homing": bool(m.get("homing", False)),
+            "armor_pierce": self.armor_pierce,
+            "armor_shred": m.get("armor_shred", 0.0),
+            "crit_chance": m.get("crit_chance", 0.0),
+            "crit_mult": m.get("crit_mult", 2.0),
+            "heavy_mult": m.get("heavy_mult", 1.0),
+            "small_mult": m.get("small_mult", 1.0),
+            "wounded_mult": m.get("wounded_mult", 1.0),
+            "bonus_vs_frozen": m.get("bonus_vs_frozen", 1.0),
+            "execute_small": bool(m.get("execute_small", False)),
+            "camo_detect": bool(m.get("camo_detect", False)),
+            "frag_count": int(m.get("frag_count", 0)),
+            "frag_damage": m.get("frag_damage", 0.35),
+            "secondary_blasts": int(m.get("secondary_blasts", 0)),
+            "frozen_explode": m.get("frozen_explode", 0.0),
+            "freeze_chance": m.get("freeze_chance", 0.0),
+            "freeze_time": m.get("freeze_time", 1.0),
+        }
+        if m.get("dot_dps"):
+            eff["dot_dps"] = m["dot_dps"] * d
+            eff["dot_time"] = m.get("dot_time", 3.0)
+        if m.get("burn_dps"):
+            eff["burn_dps"] = m["burn_dps"] * d
+            eff["burn_time"] = m.get("burn_time", 3.0)
+        if m.get("poison_dps"):
+            eff["poison_dps"] = m["poison_dps"] * d
+            eff["poison_time"] = m.get("poison_time", 4.0)
+            eff["poison_stack_max"] = m.get("poison_stack_max", 3)
+        if m.get("mark_on_hit"):
+            eff["mark_on_hit"] = True
+            eff["mark_amp"] = m.get("mark_amp", 0.2)
+            eff["mark_time"] = m.get("mark_time", 3.0)
 
-    def buy_upgrade(self, aspect):
-        self.upgrades[aspect] += 1
+        # lentidao: a da torre de gelo (`always_slow`, sempre aplica) e a
+        # dos upgrades (que pode ter chance < 1) se resolvem no mesmo
+        # campo -- vence a mais forte, e a chance vira 100% se a torre ja
+        # desacelera por natureza.
+        base_slow = spec.get("always_slow")
+        factor = m.get("slow_factor")
+        duration = m.get("slow_time", 0.0)
+        chance = m.get("slow_chance", 1.0)
+        if base_slow is not None:
+            factor = min(factor, base_slow[0]) if factor else base_slow[0]
+            duration = max(duration, base_slow[1])
+            chance = 1.0
+        if factor is not None and factor < 1.0:
+            eff["slow"] = (factor, max(duration, 1.2), chance)
+        return eff
+
+    def shot_effects(self):
+        """Efeitos deste disparo especifico. So difere de `self.effects`
+        no caminho Arqueiro Tatico: o "Arsenal Elemental" ALTERNA fogo,
+        gelo e veneno tiro a tiro (em vez de aplicar os tres), e por isso
+        precisa de uma versao filtrada por disparo."""
+        if not self.mods.get("elemental_cycle") or self.mods.get("elemental_all"):
+            return self.effects
+        eff = dict(self.effects)
+        element = self.elemental_index % 3
+        if element != 0:
+            eff.pop("burn_dps", None)
+        if element != 1:
+            eff.pop("slow", None)
+            eff["freeze_chance"] = 0.0
+        if element != 2:
+            eff.pop("poison_dps", None)
+        return eff
+
+    # ------------------------------------------------------------------
+    # ARVORE DE UPGRADES
+    # ------------------------------------------------------------------
+    @property
+    def tier6_path(self):
+        """Indice do caminho em que a torre e tier 6, ou None."""
+        for i, t in enumerate(self.tiers):
+            if t >= up.MAX_TIER:
+                return i
+        return None
+
+    @property
+    def has_ability(self):
+        return self.tier6_path is not None
+
+    def ability(self):
+        p = self.tier6_path
+        return None if p is None else up.ability_def(self.ttype, p)
+
+    def next_tier_cost(self, path_index):
+        tier = self.tiers[path_index] + 1
+        if tier > up.MAX_TIER:
+            return None
+        return up.tier_cost(self.ttype, tier)
+
+    def buy_path(self, path_index):
+        self.tiers[path_index] += 1
         self.recalc_stats()
+        if self.has_ability:
+            ab = self.ability()
+            # entra em cooldown ao nascer: a super torre nao dispara a
+            # habilidade no mesmo instante da compra
+            self.ability_cd = ab["cooldown"] * 0.5
+
+    def display_name(self):
+        return spec_name(self.ttype, self.tiers) or TOWER_TYPES[self.ttype]["label"]
+
+    def color(self):
+        return path_tinted_color(self.level, self.ttype, self.tiers)
 
     def grid_pos(self):
         gx = GRID_ORIGIN_X + self.col * CELL_SIZE + CELL_SIZE // 2
         gy = GRID_ORIGIN_Y + self.row * CELL_SIZE + CELL_SIZE // 2
         return gx, gy
 
-    def update(self, dt, enemies, projectiles):
+    # ------------------------------------------------------------------
+    # COMBATE
+    # ------------------------------------------------------------------
+    def _acquire_target(self, world):
+        """Escolhe alvo dentro do alcance. O padrao e "o que esta mais
+        longe no caminho" (prestes a vazar); com o mod `target_priority`
+        = "strongest" a torre passa a cacar o inimigo mais perigoso, que
+        e a identidade dos caminhos Cacador/Executor/Deus do Tiro."""
+        gx, gy = self.grid_pos()
+        r2 = self.range * self.range
+        strongest = self.mods.get("target_priority") == "strongest"
+        detector = self.effects.get("camo_detect", False)
+        total = world.map_path.total_len
+        best = None
+        best_score = -1.0
+        for e in world.enemies:
+            if not e.alive:
+                continue
+            if e.evasive and not detector:
+                # sem deteccao a torre ainda atira, mas prefere quem ela
+                # consegue acertar de forma confiavel
+                pass
+            if (e.x - gx) ** 2 + (e.y - gy) ** 2 > r2:
+                continue
+            score = e.danger_score(total) if strongest else e.dist
+            if score > best_score:
+                best = e
+                best_score = score
+        return best
+
+    def update(self, dt, world):
         if self.being_dragged:
             return
         self.cooldown -= dt
-        gx, gy = self.grid_pos()
+        self._update_aura(dt, world)
 
-        # valida alvo atual
+        gx, gy = self.grid_pos()
         if self.target is not None:
             if (not self.target.alive or
                     math.hypot(self.target.x - gx, self.target.y - gy) > self.range):
                 self.target = None
-
         if self.target is None:
-            best = None
-            best_dist = -1
-            for e in enemies:
-                if not e.alive:
-                    continue
-                d = math.hypot(e.x - gx, e.y - gy)
-                if d <= self.range and e.dist > best_dist:
-                    best = e
-                    best_dist = e.dist
-            self.target = best
+            self.target = self._acquire_target(world)
+
+        # rajada em andamento (tiros extras do mesmo ataque)
+        if self.pending_burst > 0:
+            self.burst_timer -= dt
+            if self.burst_timer <= 0:
+                self.pending_burst -= 1
+                self.burst_timer = BURST_INTERVAL
+                self._fire_volley(world)
 
         if self.target is not None and self.cooldown <= 0:
             self.cooldown = self.fire_rate
-            color = tower_color(self.level)
-            spec = TOWER_TYPES[self.ttype]
-            proj = Projectile(gx, gy, self.target, spec["proj_speed"], self.damage, color,
-                               splash=self.splash, slow=self.slow,
-                               shape=spec["proj_shape"], armor_pierce=self.armor_pierce)
-            projectiles.append(proj)
+            self._fire_volley(world)
+            if self.burst > 1:
+                self.pending_burst = self.burst - 1
+                self.burst_timer = BURST_INTERVAL
 
+    def _fire_volley(self, world):
+        """Um "ataque": `self.shots` projeteis simultaneos, em leque."""
+        if self.target is None or not self.target.alive:
+            self.target = self._acquire_target(world)
+            if self.target is None:
+                return
+        gx, gy = self.grid_pos()
+        eff = self.shot_effects()
+        self.elemental_index += 1
+        color = self.color()
+        spec = TOWER_TYPES[self.ttype]
+        base_angle = math.atan2(self.target.y - gy, self.target.x - gx)
+        n = self.shots
+        for i in range(n):
+            offset = 0.0 if n == 1 else (i - (n - 1) / 2) * SHOT_SPREAD
+            world.projectiles.append(Projectile(
+                gx, gy, self.target, self.proj_speed, self.damage, color, eff,
+                shape=spec["proj_shape"], angle=base_angle + offset,
+                max_dist=self.range * 1.8,
+            ))
+
+    def _update_aura(self, dt, world):
+        """Auras (Era Glacial, Campo de Permafrost, Olho de Deus): em vez
+        de um efeito continuo por frame, pulsam a cada
+        AURA_PULSE_INTERVAL aplicando status de duracao curta. Fica muito
+        mais barato e o efeito pratico e o mesmo -- quem fica dentro da
+        area nunca sai do debuff."""
+        if self.aura_radius <= 0:
+            return
+        self.aura_timer -= dt
+        if self.aura_timer > 0:
+            return
+        self.aura_timer = AURA_PULSE_INTERVAL
+        m = self.mods
+        gx, gy = self.grid_pos()
+        r2 = self.aura_radius * self.aura_radius
+        hold = AURA_PULSE_INTERVAL * 2.5  # status dura ate o proximo pulso
+        color = self.color()
+        world.vfx.append(Field(gx, gy, self.aura_radius, color, life=AURA_PULSE_INTERVAL * 1.6))
+        for e in world.enemies:
+            if not e.alive:
+                continue
+            if (e.x - gx) ** 2 + (e.y - gy) ** 2 > r2:
+                continue
+            if m.get("aura_slow_factor"):
+                e.apply_slow(m["aura_slow_factor"], hold)
+            if m.get("aura_vuln_amp"):
+                e.apply_mark(m["aura_vuln_amp"], hold)
+            if m.get("aura_mark_amp"):
+                e.apply_mark(m["aura_mark_amp"], hold)
+            if m.get("aura_armor_shred"):
+                e.apply_shred(m["aura_armor_shred"], hold)
+            if m.get("aura_freeze_chance") and random.random() < m["aura_freeze_chance"]:
+                e.apply_freeze(m.get("freeze_time", 1.0))
+            if m.get("aura_damage_dps"):
+                combat.resolve_hit(world, e, self.damage * m["aura_damage_dps"] * AURA_PULSE_INTERVAL,
+                                   {"armor_pierce": True}, ignore_dodge=True)
+
+    # ------------------------------------------------------------------
+    # DESENHO
+    # ------------------------------------------------------------------
     def draw(self, surf, mouse_pos, dragging_this):
         if dragging_this:
             gx, gy = mouse_pos
@@ -370,9 +645,7 @@ class Tower:
             gx, gy = self.grid_pos()
         gx, gy = int(gx), int(gy)
 
-        color = tower_color(self.level)
-        # raio base reduzido (torres menores no geral) + multiplicador por
-        # tipo (_SIZE_SCALE) -- a sniper encolhe mais que o resto.
+        color = self.color()
         radius = (19 + min(self.level, 10) * 1.1) * _SIZE_SCALE.get(self.ttype, _DEFAULT_SIZE_SCALE)
 
         # range indicator quando arrastando ou hover
@@ -384,8 +657,6 @@ class Tower:
 
         # mira: quem gira e a TORRE INTEIRA (base + corpo + cano, como um
         # bloco rigido), nao um cano sozinho girando sobre um corpo parado.
-        # `ang` e a direcao do alvo (ou a pose neutra, pra cima, sem alvo) --
-        # ver comentario de _NEUTRAL_ANGLE e de draw_tower_shape.
         if self.target is not None and self.target.alive:
             ang = math.atan2(self.target.y - gy, self.target.x - gx)
         else:
@@ -393,15 +664,10 @@ class Tower:
 
         # Enquanto arrastando, a torre e desenhada numa CAMADA separada
         # (surface propria com alpha) e so no final colada com
-        # transparencia em cima do jogo -- em vez de pintar direto e
-        # totalmente opaco na `surf` principal. Sem isso, ao passar a
-        # torre arrastada por cima de uma vizinha, a base/prato escuro
-        # (opaco) cobria a torre de baixo com um corte duro e sem
-        # suavidade, dando a impressao de "borda errada" na sobreposicao.
-        # Com alpha, a sobreposicao fica um efeito "fantasma" translucido,
-        # legivel e sem corte abrupto.
+        # transparencia em cima do jogo -- sem isso a base opaca cortava
+        # a torre de baixo com uma borda dura ao passar por cima dela.
         if dragging_this:
-            margin = int(radius * 2.6) + 40
+            margin = int(radius * 3.2) + 40
             layer = pygame.Surface((margin * 2, margin * 2), pygame.SRCALPHA)
             lx, ly = margin, margin
             target = layer
@@ -409,14 +675,49 @@ class Tower:
             lx, ly = gx, gy
             target = surf
 
-        # corpo/base/cano/nivel: nucleo de aparencia compartilhado com
-        # qualquer preview de UI (ver draw_tower_shape acima) -- assim a
-        # torre no grid e o card de compra/ghost de arrasto nunca ficam
-        # dessincronizados visualmente.
-        draw_tower_shape(target, lx, ly, self.ttype, self.level, angle=ang,
-                          radius=radius, show_level=True)
+        drawn_r = draw_tower_shape(target, lx, ly, self.ttype, self.level, angle=ang,
+                                    radius=radius, show_level=True, tiers=self.tiers)
+
+        # marcador dos caminhos comprados: tres tracinhos curtos abaixo da
+        # torre, um por caminho, com o comprimento proporcional ao tier.
+        # E a leitura rapida de "no que essa torre foi investida" sem
+        # precisar clicar nela.
+        if max(self.tiers) > 0:
+            bw = 9
+            total_w = bw * 3 + 4
+            bx = lx - total_w // 2
+            by = ly + drawn_r + 17
+            for i, tier in enumerate(self.tiers):
+                pc = up.PATH_COLORS[self.ttype][i]
+                col = pc if tier > 0 else (60, 64, 74)
+                h = 2 + tier
+                pygame.draw.rect(target, col, (bx + i * (bw + 2), by - h, bw, h),
+                                 border_radius=1)
+
+        # anel de cooldown da habilidade tier 6
+        if self.has_ability and not dragging_this:
+            self._draw_ability_ring(target, lx, ly, drawn_r)
 
         if dragging_this:
             pygame.draw.circle(target, COL_MERGE_GLOW, (lx, ly), int(radius) + 10, 3)
             layer.set_alpha(215)
             surf.blit(layer, (gx - margin, gy - margin))
+
+    def _draw_ability_ring(self, surf, cx, cy, radius):
+        ab = self.ability()
+        r = int(radius + 10)
+        if self.ability_active > 0:
+            pygame.draw.circle(surf, (255, 255, 180), (cx, cy), r, 3)
+            return
+        frac = 1.0 - max(0.0, min(1.0, self.ability_cd / ab["cooldown"]))
+        if frac >= 1.0:
+            pygame.draw.circle(surf, (255, 225, 120), (cx, cy), r, 2)
+            return
+        # arco de recarga (desenhado como pontinhos: pygame.draw.arc fica
+        # serrilhado e sumido em raios pequenos como esse)
+        steps = 28
+        for i in range(int(steps * frac)):
+            a = -math.pi / 2 + (i / steps) * math.tau
+            px = cx + math.cos(a) * r
+            py = cy + math.sin(a) * r
+            pygame.draw.circle(surf, (255, 225, 120), (int(px), int(py)), 2)

@@ -87,6 +87,11 @@ def draw_hud(game, surf):
     map_txt = font_small.render(f"Mapa: {map_name} (M)", True, COL_TEXT_DIM)
     surf.blit(map_txt, (info_x, 40))
 
+    # ocupacao dos slots de tier 6 (um por TIPO de torre): mostra de
+    # relance quais super torres ja foram gastas na partida, que e a
+    # decisao mais irreversivel do jogo
+    _draw_tier6_slots(game, surf, info_x + 150, 20)
+
     # ------------------------------------------------------------------
     # CLUSTER DIREITO: largura reservada (RIGHT_W) para nunca colidir com
     # o texto de abates/mapa a esquerda, nao importa o tamanho da janela.
@@ -124,12 +129,41 @@ def draw_hud(game, surf):
     btn_txt = font_small.render(label, True, txt_col)
     theme.button(surf, btn_rect, game.mouse_pos, COL_GOLD, btn_txt, enabled=not game.paused, radius=9)
 
+    # anuncio de habilidade tier 6 disparada pela IA: como o jogador nao
+    # clica pra ativar, sem esse aviso o efeito parece acontecer "do nada"
+    if getattr(game, "ability_banner", None) is not None:
+        name, life = game.ability_banner
+        alpha = max(0, min(255, int(255 * min(1.0, life))))
+        a_txt = font_med.render(name, True, (255, 230, 140))
+        a_txt.set_alpha(alpha)
+        arect = a_txt.get_rect(center=(WIDTH // 2, TOP_HUD_HEIGHT + 52))
+        surf.blit(a_txt, arect)
+
     if game.paused:
         p_txt = font_big.render("PAUSADO (P para continuar)", True, COL_WHITE)
         rect = p_txt.get_rect(center=(WIDTH // 2, TOP_HUD_HEIGHT + 24))
         pad_rect = rect.inflate(24, 12)
         theme.draw_panel(surf, pad_rect, (30, 20, 10), border=COL_GOLD, radius=8)
         surf.blit(p_txt, rect)
+
+
+def _draw_tier6_slots(game, surf, x, y):
+    """Cinco quadradinhos, um por tipo de torre: aceso = o tier 6 daquele
+    tipo ja existe na partida (limite de 1 por tipo, 5 no total)."""
+    from ..config import TOWER_TYPE_KEYS
+    font = get_font(11)
+    used = {t.ttype for t in game.towers.values() if t.has_ability}
+    surf.blit(font.render("Tier 6", True, COL_TEXT_DIM), (x, y - 14))
+    size = 14
+    for i, key in enumerate(TOWER_TYPE_KEYS):
+        rect = pygame.Rect(x + i * (size + 5), y + 2, size, size)
+        if key in used:
+            pygame.draw.rect(surf, (255, 225, 120), rect, border_radius=3)
+        else:
+            pygame.draw.rect(surf, (44, 50, 62), rect, border_radius=3)
+            pygame.draw.rect(surf, (70, 76, 90), rect, 1, border_radius=3)
+    cnt = font.render(f"{len(used)}/5", True, COL_TEXT_DIM)
+    surf.blit(cnt, (x + 5 * (size + 5) + 4, y + 3))
 
 
 def draw_game_over(game, surf):

@@ -23,13 +23,19 @@ import pygame
 from ..config import (
     WIDTH, HEIGHT, TOP_HUD_HEIGHT, BOTTOM_HUD_HEIGHT,
     TOWER_PANEL_WIDTH, TOWER_PANEL_CARD_H, TOWER_PANEL_CARD_GAP,
-    TOWER_TYPES, TOWER_TYPE_KEYS, UPGRADE_LABELS,
+    TOWER_TYPES, TOWER_TYPE_KEYS,
     COL_WHITE, COL_RED, COL_GOLD, COL_GREEN, COL_TEXT_DIM, COL_PANEL,
     COL_GRID_BORDER,
 )
 from ..fonts import get_font
 from ..entities.tower import tower_color, tower_name, draw_tower_shape
+from .. import upgrades as up
 from . import theme
+
+
+# altura de cada card de caminho no modo upgrade
+PATH_CARD_H = 122
+PATH_CARD_GAP = 9
 
 
 # ----------------------------------------------------------------------
@@ -66,25 +72,28 @@ def shop_card_rects(panel_x):
     return rects
 
 
+def upgrade_header_h():
+    """Altura reservada para o botao voltar + cabecalho da torre."""
+    return 12 + 30 + 74
+
+
 def upgrade_button_rects(panel_x):
-    """Retorna (rects, back_rect) para o modo de upgrade dentro do
-    painel. rects e uma lista de (rect, aspect)."""
+    """Retorna (rects, back_rect) para o modo de upgrade dentro do painel.
+
+    `rects` e uma lista de (rect, path_index) -- um card por CAMINHO da
+    arvore de upgrades (ver towerdefense/upgrades.py). Substituiu os tres
+    botoes fixos de dano/alcance/cadencia da versao antiga.
+    """
     area = panel_area_rect()
     area.x = panel_x
     back_rect = pygame.Rect(area.x + 12, area.y + 12, area.w - 24, 30)
     w = area.w - 24
-    h = 56
-    gap = 10
-    # 70 (nao 44): o cabecalho agora desenha a torre de verdade (com cano),
-    # que e mais alta que o icone de forma generico antigo -- ver
-    # _draw_upgrade_mode. Se nao abrir esse espaco, o cano da sniper (o
-    # mais longo) entra por baixo do primeiro botao de melhoria.
-    start_y = area.y + 12 + 30 + 70  # abaixo do botao voltar + cabecalho
-    aspects = ["damage", "range", "rate"]
+    start_y = area.y + upgrade_header_h()
     rects = []
-    for i, aspect in enumerate(aspects):
-        r = pygame.Rect(area.x + 12, start_y + i * (h + gap), w, h)
-        rects.append((r, aspect))
+    for i in range(3):
+        r = pygame.Rect(area.x + 12, start_y + i * (PATH_CARD_H + PATH_CARD_GAP),
+                        w, PATH_CARD_H)
+        rects.append((r, i))
     return rects, back_rect
 
 
@@ -204,6 +213,35 @@ def _draw_shop_mode(game, surf, panel_x):
         surf.blit(htxt, (rect.x + 10, rect.bottom - 18))
 
 
+def _wrap(font, text, max_w, max_lines=2):
+    words = text.split(" ")
+    lines, cur = [], ""
+    for w in words:
+        test = (cur + " " + w).strip()
+        if font.size(test)[0] > max_w and cur:
+            lines.append(cur)
+            cur = w
+            if len(lines) == max_lines:
+                break
+        else:
+            cur = test
+    if cur and len(lines) < max_lines:
+        lines.append(cur)
+    return lines
+
+
+def _draw_tier_pips(surf, x, y, tier, color, size=9, gap=3):
+    """Seis quadradinhos mostrando o progresso do caminho (tier 0..6)."""
+    for i in range(up.MAX_TIER):
+        rect = pygame.Rect(x + i * (size + gap), y, size, size)
+        if i < tier:
+            fill = color if i < up.MAX_TIER - 1 else (255, 225, 120)
+            pygame.draw.rect(surf, fill, rect, border_radius=2)
+        else:
+            pygame.draw.rect(surf, (52, 58, 70), rect, border_radius=2)
+            pygame.draw.rect(surf, (72, 78, 92), rect, 1, border_radius=2)
+
+
 def _draw_upgrade_mode(game, surf, panel_x):
     cell = game.selected_tower_cell
     tower = game.towers[cell]
@@ -219,61 +257,94 @@ def _draw_upgrade_mode(game, surf, panel_x):
     back_txt = font_back.render("< Voltar", True, COL_WHITE)
     surf.blit(back_txt, back_txt.get_rect(center=back_rect.center))
 
-    # cabecalho: torre de verdade (nao icone generico da forma) + tipo + nivel.
-    # O cano aponta pra BAIXO (angle=pi/2) de proposito: e a direcao com
-    # mais espaco livre aqui (entre o cabecalho e os botoes de melhoria),
-    # sem disputar espaco com o botao "Voltar" acima nem com o texto ao
-    # lado -- ver o "70" em upgrade_button_rects, calculado pra caber ate
-    # o cano mais longo (sniper).
-    color = tower_color(tower.level)
+    # cabecalho: torre de verdade (com cano apontando pra baixo, que e a
+    # direcao com mais espaco livre aqui), nome da especializacao e a
+    # configuracao em notacao BTD (ex.: "4-2-0")
+    color = tower.color()
     spec = TOWER_TYPES[tower.ttype]
-    icon_cy = back_rect.bottom + 26
-    draw_tower_shape(surf, area.x + 26, icon_cy, tower.ttype, tower.level,
-                      angle=math.pi / 2, radius=14, show_level=False)
+    icon_cy = back_rect.bottom + 28
+    draw_tower_shape(surf, area.x + 28, icon_cy, tower.ttype, tower.level,
+                      angle=math.pi / 2, radius=14, show_level=False, tiers=tower.tiers)
     font_h = get_font(15, bold=True)
-    header = font_h.render(spec["label"], True, COL_WHITE)
-    surf.blit(header, (area.x + 54, back_rect.bottom + 10))
+    header = font_h.render(tower.display_name(), True, COL_WHITE)
+    surf.blit(header, (area.x + 58, back_rect.bottom + 8))
     font_sub = get_font(12)
-    sub = font_sub.render(f"{tower_name(tower.level)} (Nv.{tower.level})", True, color)
-    surf.blit(sub, (area.x + 54, back_rect.bottom + 30))
+    conf = "-".join(str(t) for t in tower.tiers)
+    sub = font_sub.render(f"{spec['label']} - Nv.{tower.level}  [{conf}]", True, color)
+    surf.blit(sub, (area.x + 58, back_rect.bottom + 28))
+    stats = font_sub.render(
+        f"{tower.damage:0.0f} dmg | {tower.range:0.0f} alc | {1/tower.fire_rate:0.1f}/s",
+        True, COL_TEXT_DIM)
+    surf.blit(stats, (area.x + 58, back_rect.bottom + 46))
 
-    font_lbl = get_font(13, bold=True)
-    font_val = get_font(11)
-    for rect, aspect in rects:
-        pts = tower.upgrades[aspect]
-        cost = int(round(tower.upgrade_cost(aspect) * game.meta.upgrade_cost_mult()))
-        cost = max(1, cost)
-        affordable = game.gold >= cost
+    font_path = get_font(13, bold=True)
+    font_name = get_font(13, bold=True)
+    font_desc = get_font(11)
+    font_cost = get_font(12, bold=True)
+
+    for rect, path_index in rects:
+        pdef = up.path_def(tower.ttype, path_index)
+        pcolor = up.PATH_COLORS[tower.ttype][path_index]
+        tier = tower.tiers[path_index]
+        ok, cost, reason = game.path_purchase_state(tower, path_index)
         hovered = rect.collidepoint(game.mouse_pos)
+        maxed = tier >= up.MAX_TIER
 
-        base_fill = (30, 40, 34) if affordable else (30, 30, 34)
-        if hovered and affordable:
-            base_fill = theme.shade(base_fill, 0.15)
-        border_col = COL_GREEN if affordable else (80, 80, 86)
-        theme.draw_panel(surf, rect, base_fill, border=border_col, radius=8,
-                          border_w=2 if not hovered else 3, shadow=False)
-
-        lbl = font_lbl.render(UPGRADE_LABELS[aspect], True, COL_WHITE)
-        surf.blit(lbl, (rect.x + 10, rect.y + 6))
-        lvl_txt = font_val.render(f"nivel {pts}", True, COL_TEXT_DIM)
-        surf.blit(lvl_txt, (rect.x + 10, rect.y + 26))
-
-        cost_col = COL_GOLD if affordable else COL_TEXT_DIM
-        cost_txt = font_val.render(f"{cost}g" if affordable else f"{cost}g (sem ouro)", True, cost_col)
-        crect = cost_txt.get_rect()
-        crect.topright = (rect.right - 10, rect.y + 26)
-        surf.blit(cost_txt, crect)
-
-        if aspect == "damage":
-            stat_txt = f"{tower.damage:0.0f} dmg"
-        elif aspect == "range":
-            stat_txt = f"{tower.range:0.0f} alcance"
+        if maxed:
+            fill, border = (46, 40, 24), (255, 225, 120)
+        elif ok:
+            fill = theme.shade(pcolor, -0.80 if not hovered else -0.70)
+            border = pcolor
         else:
-            stat_txt = f"{1/tower.fire_rate:0.2f} tiros/s"
-        stxt = font_val.render(stat_txt, True, COL_TEXT_DIM)
-        srect = stxt.get_rect()
-        srect.topright = (rect.right - 10, rect.y + 6)
-        surf.blit(stxt, srect)
+            fill, border = (28, 30, 36), (72, 76, 86)
+        theme.draw_panel(surf, rect, fill, border=border, radius=8,
+                          border_w=3 if (hovered and ok) else 2, shadow=False)
+
+        # linha 1: nome do caminho + tier atual
+        name_col = COL_WHITE if (ok or maxed) else COL_TEXT_DIM
+        surf.blit(font_path.render(pdef["name"], True, name_col), (rect.x + 10, rect.y + 7))
+        tier_txt = font_cost.render(f"{tier}/{up.MAX_TIER}", True, pcolor)
+        trect = tier_txt.get_rect()
+        trect.topright = (rect.right - 10, rect.y + 7)
+        surf.blit(tier_txt, trect)
+
+        _draw_tier_pips(surf, rect.x + 10, rect.y + 27, tier, pcolor)
+        surf.blit(font_desc.render(pdef["short"], True, COL_TEXT_DIM),
+                  (rect.x + 10 + 6 * 12 + 8, rect.y + 27))
+
+        # linha 2: proximo upgrade (nome + descricao) ou "concluido"
+        if maxed:
+            ab = up.ability_def(tower.ttype, path_index)
+            surf.blit(font_name.render(f"TIER 6 - {ab['name']}", True, (255, 225, 120)),
+                      (rect.x + 10, rect.y + 46))
+            for i, line in enumerate(_wrap(font_desc, ab["desc"], rect.w - 20, 3)):
+                surf.blit(font_desc.render(line, True, COL_TEXT_DIM),
+                          (rect.x + 10, rect.y + 64 + i * 14))
+            # estado da habilidade automatica
+            if tower.ability_active > 0:
+                st, stc = "HABILIDADE ATIVA", (255, 255, 160)
+            elif tower.ability_cd <= 0:
+                st, stc = "Pronta - a IA escolhe a hora", (140, 255, 170)
+            else:
+                st, stc = f"Recarregando: {tower.ability_cd:0.1f}s", COL_TEXT_DIM
+            surf.blit(font_cost.render(st, True, stc), (rect.x + 10, rect.bottom - 20))
+            continue
+
+        nxt = up.tier_def(tower.ttype, path_index, tier + 1)
+        surf.blit(font_name.render(f"{tier + 1}. {nxt['name']}", True, name_col),
+                  (rect.x + 10, rect.y + 46))
+        for i, line in enumerate(_wrap(font_desc, nxt["desc"], rect.w - 20, 2)):
+            surf.blit(font_desc.render(line, True, COL_TEXT_DIM),
+                      (rect.x + 10, rect.y + 64 + i * 14))
+
+        # linha 3: custo (ou o motivo do bloqueio)
+        if cost is None:
+            info, icol = reason, COL_TEXT_DIM
+        elif ok:
+            info, icol = f"{cost}g", COL_GOLD
+        else:
+            info, icol = f"{cost}g - {reason}", COL_TEXT_DIM
+        surf.blit(font_cost.render(info, True, icol), (rect.x + 10, rect.bottom - 20))
 
 
 def draw_dragged_card_ghost(game, surf):

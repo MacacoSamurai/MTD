@@ -63,28 +63,46 @@ def draw_tower_range_hover(game, surf, offset):
         return
     t = game.towers[cell]
     gx, gy = t.grid_pos()
-    color = tower_color(t.level)
+    color = t.color()
     range_surf = pygame.Surface((t.range * 2, t.range * 2), pygame.SRCALPHA)
     pygame.draw.circle(range_surf, (*color, 35), (t.range, t.range), t.range)
     pygame.draw.circle(range_surf, (*color, 110), (t.range, t.range), t.range, 2)
+    if t.aura_radius > 0:
+        # a aura tem raio proprio (mod `aura_radius_mult`), quase sempre
+        # diferente do alcance de tiro -- mostrar so o alcance enganaria
+        r = int(t.aura_radius)
+        pygame.draw.circle(range_surf, (*color, 60), (t.range, t.range), r, 3)
     surf.blit(range_surf, (gx - t.range, gy - t.range))
 
     # tooltip com stats
     font = get_font(15, bold=True)
     font2 = get_font(13)
-    label = TOWER_TYPES[t.ttype]["label"]
-    from ..entities.tower import tower_name
+    conf = "-".join(str(x) for x in t.tiers)
     lines = [
-        f"{label} - {tower_name(t.level)} (Nv.{t.level})",
-        f"Dano: {t.damage:0.0f}   Alcance: {t.range:0.0f}",
-        f"Cadencia: {1/t.fire_rate:0.1f}/s",
+        f"{t.display_name()} [{conf}]",
+        f"Nv.{t.level} - Dano {t.damage:0.0f} | Alcance {t.range:0.0f}",
+        f"Cadencia: {1/t.fire_rate:0.1f}/s" + (f" x{t.shots}" if t.shots > 1 else ""),
     ]
     if t.splash > 0:
         lines.append(f"Splash: {t.splash:0.0f}px")
+    if t.effects.get("pierce"):
+        lines.append(f"Perfura {t.effects['pierce']} inimigos")
     if t.slow:
         lines.append(f"Lentidao: {int((1-t.slow[0])*100)}%")
+    if t.effects.get("freeze_chance"):
+        lines.append(f"Congela: {int(t.effects['freeze_chance']*100)}%")
+    if t.effects.get("heavy_mult", 1.0) > 1.0:
+        lines.append(f"Vs pesados: x{t.effects['heavy_mult']:0.1f}")
+    if t.effects.get("crit_chance"):
+        lines.append(f"Critico: {int(t.effects['crit_chance']*100)}% (x{t.effects['crit_mult']:0.1f})")
+    if t.effects.get("mark_on_hit"):
+        lines.append(f"Marca alvos: +{int(t.effects['mark_amp']*100)}% dano")
+    if t.aura_radius > 0:
+        lines.append("Aura ativa ao redor da torre")
     if t.armor_pierce:
         lines.append("Ignora armadura")
+    if t.has_ability:
+        lines.append(f"HABILIDADE: {t.ability()['name']}")
     pad = 8
     icon_w = 26
     w = max(font.size(l)[0] for l in lines) + pad * 2 + icon_w

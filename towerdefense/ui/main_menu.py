@@ -48,8 +48,84 @@ def help_close_rect():
     return pygame.Rect(panel.right - 44, panel.y + 14, 30, 30)
 
 
+# ----------------------------------------------------------------------
+# CONTEUDO DO "COMO JOGAR"
+# Fica no nivel do modulo (e nao dentro de draw_help_overlay) porque a
+# ALTURA do painel e calculada a partir dele: o texto cresceu quando a
+# arvore de caminhos entrou no jogo e passou a vazar por baixo da borda
+# de um painel de altura fixa. Agora geometria e desenho leem a mesma
+# fonte de verdade.
+# ----------------------------------------------------------------------
+HELP_SECTIONS = [
+    ("Objetivo", [
+        "Impeca que os inimigos cheguem ao fim do caminho, construindo e "
+        "melhorando torres. As ondas sao infinitas e ficam mais dificeis "
+        "com o tempo - sobreviva o maximo que conseguir.",
+    ]),
+    ("Construir e fundir torres", [
+        "Clique num slot vazio da grade para escolher e comprar um tipo de torre.",
+        "Arraste uma torre sobre OUTRA do mesmo tipo para fazer merge: se tiverem "
+        "o mesmo nivel, o resultado sobe um nivel (nao ha nivel maximo).",
+    ]),
+    ("Caminhos de evolucao (3 x 6)", [
+        "Clique rapido numa torre para abrir a arvore dela: cada torre tem 3 "
+        "caminhos de 6 tiers, com identidades bem diferentes.",
+        "Regra de crosspath: so da pra abrir DOIS caminhos, e apenas UM deles "
+        "pode passar do tier 2 - o outro trava ali. Escolha bem a especializacao.",
+        "O tier 6 e a super torre: ganha uma habilidade poderosa que a IA dispara "
+        "sozinha na melhor hora. So pode existir UMA torre tier 6 de cada TIPO "
+        "na partida (no maximo 5 no total, uma de cada tipo).",
+    ]),
+    ("Ondas e bosses", [
+        "Pressione ESPACO para iniciar a proxima onda manualmente, ou espere o "
+        "inicio automatico. Pressione N para pular a onda atual e ganhar ouro extra.",
+        "A cada 10 ondas aparece um boss, que solta gemas ao morrer.",
+    ]),
+    ("Progressao permanente", [
+        "Pressione G durante a partida para abrir a loja de gemas: melhorias "
+        "permanentes que persistem entre partidas (ouro inicial, vidas, "
+        "descontos e mais).",
+    ]),
+    ("Controles", [
+        "Mouse: comprar/arrastar/soltar torres, pular onda, abrir loja.  "
+        "ESPACO: proxima onda.  N: pular onda.  G: loja de gemas.  "
+        "P: pausar.  M: trocar de mapa.  R: reiniciar apos game over.",
+    ]),
+]
+
+
+def _help_wrap(text, font, width):
+    words = text.split(" ")
+    lines, cur = [], ""
+    for w in words:
+        test = (cur + " " + w).strip()
+        if font.size(test)[0] > width:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = test
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _help_content_height(max_w):
+    font_h = get_font(15, bold=True)
+    font_p = get_font(13)
+    h = 0
+    for heading, paragraphs in HELP_SECTIONS:
+        h += 22
+        for para in paragraphs:
+            h += 18 * len(_help_wrap(para, font_p, max_w))
+            h += 6
+    return h
+
+
 def help_panel_rect():
-    w, h = 760, 560
+    """Painel do 'Como Jogar'. A altura acompanha o texto (com um teto
+    pra nunca passar da janela) -- ver comentario em HELP_SECTIONS."""
+    w = 820
+    h = min(HEIGHT - 40, 86 + _help_content_height(w - 56))
     return pygame.Rect((WIDTH - w) // 2, (HEIGHT - h) // 2, w, h)
 
 
@@ -182,59 +258,13 @@ def draw_help_overlay(surf, mouse_pos):
     y = panel_rect.y + 62
     x = panel_rect.x + 28
     max_w = panel_rect.w - 56
-
-    def wrap(text, font, width):
-        words = text.split(" ")
-        lines, cur = [], ""
-        for w in words:
-            test = (cur + " " + w).strip()
-            if font.size(test)[0] > width:
-                lines.append(cur)
-                cur = w
-            else:
-                cur = test
-        if cur:
-            lines.append(cur)
-        return lines
-
-    sections = [
-        ("Objetivo", [
-            "Impeca que os inimigos cheguem ao fim do caminho, construindo e "
-            "melhorando torres. As ondas sao infinitas e ficam mais dificeis "
-            "com o tempo - sobreviva o maximo que conseguir.",
-        ]),
-        ("Construir e fundir torres", [
-            "Clique num slot vazio da grade para escolher e comprar um tipo de torre.",
-            "Arraste uma torre sobre OUTRA do mesmo tipo para fazer merge: se tiverem "
-            "o mesmo nivel, o resultado sobe um nivel (nao ha nivel maximo).",
-            "Clique rapido (sem arrastar) numa torre para abrir o menu de melhorias "
-            "e gastar ouro em Dano, Alcance ou Cadencia daquela torre.",
-        ]),
-        ("Ondas e bosses", [
-            "Pressione ESPACO para iniciar a proxima onda manualmente, ou espere o "
-            "inicio automatico. Pressione N para pular a onda atual e ganhar ouro extra.",
-            "A cada 10 ondas aparece um boss, que solta gemas ao morrer.",
-        ]),
-        ("Progressao permanente", [
-            "Pressione G durante a partida para abrir a loja de gemas: melhorias "
-            "permanentes que persistem entre partidas (ouro inicial, vidas, "
-            "descontos e mais).",
-        ]),
-        ("Controles", [
-            "Mouse: comprar/arrastar/soltar torres, pular onda, abrir loja.  "
-            "ESPACO: proxima onda.  N: pular onda.  G: loja de gemas.  "
-            "P: pausar.  M: trocar de mapa.  R: reiniciar apos game over.",
-        ]),
-    ]
-
-    for heading, paragraphs in sections:
+    for heading, paragraphs in HELP_SECTIONS:
         h_txt = font_h.render(heading, True, COL_WHITE)
         surf.blit(h_txt, (x, y))
         y += 22
         for para in paragraphs:
-            for line in wrap(para, font_p, max_w):
+            for line in _help_wrap(para, font_p, max_w):
                 l_txt = font_p.render(line, True, COL_TEXT_DIM)
                 surf.blit(l_txt, (x, y))
                 y += 18
             y += 6
-        y += 6

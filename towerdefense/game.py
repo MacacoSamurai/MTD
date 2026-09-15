@@ -18,7 +18,9 @@ from .config import (
 from .paths import MapPath
 from .maps import DEFAULT_MAP_ID
 from .entities import Tower
-from .systems import WaveManager, MetaUpgrades
+from .entities.enemy import Enemy
+from .systems import WaveManager, MetaUpgrades, AbilityController, combat, vfx
+from . import upgrades as up
 from .fonts import get_font
 from .ui import hud, menus, board, map_menu, main_menu, tower_panel
 
@@ -60,7 +62,20 @@ class Game:
         self.lives = STARTING_LIVES + self.meta.bonus_lives()
         self.enemies = []
         self.projectiles = []
+        # `vfx` e `pending_blasts` fazem do Game o "world" que entities/ e
+        # systems/ recebem (ver comentario de convencao em systems/combat.py):
+        # projeteis, explosoes e habilidades escrevem aqui em vez de
+        # conhecer a classe Game.
+        self.vfx = []
+        self.pending_blasts = []
         self.towers = {}  # (col, row) -> Tower
+        self.abilities = AbilityController()
+        self.ability_banner = None  # [nome, tempo_restante] mostrado no HUD
+        # efeitos globais de habilidade sao atributos de classe do Enemy:
+        # zerar aqui evita comecar uma partida nova com a pista ainda sob
+        # DOMINIO ETERNO da partida anterior
+        Enemy.global_amp = 0.0
+        Enemy.global_slow = 1.0
         self.wave_mgr = WaveManager(self.map_path)
         self.paused = False
         self.game_over = False
@@ -170,6 +185,47 @@ class Game:
     def toggle_tower_panel(self):
         self.tower_panel_open = not self.tower_panel_open
 
+    # ------------------------------------------------------------------
+    # ARVORE DE UPGRADES (caminhos / crosspath / tier 6)
+    # ------------------------------------------------------------------
+    def tier6_owner(self, ttype):
+        """Celula da torre que JA usou o tier 6 daquele tipo nesta
+        partida, ou None. E a regra fundamental do documento: um unico
+        tier 6 por TIPO de torre (os tres caminhos sao alternativos)."""
+        for cell, t in self.towers.items():
+            if t.ttype == ttype and t.has_ability:
+                return cell
+        return None
+
+    def path_purchase_state(self, tower, path_index):
+        """Tudo que a UI e o clique precisam saber sobre comprar o proximo
+        tier de um caminho: (pode_comprar, custo, motivo_do_bloqueio).
+
+        Concentrado aqui de proposito -- desenho (tower_panel) e clique
+        (try_click_panel_upgrade) leem da MESMA fonte, entao um botao
+        nunca aparece habilitado e recusa a compra (ou vice-versa).
+        """
+        tier = tower.tiers[path_index] + 1
+        if tier > up.MAX_TIER:
+            return False, None, "Tier maximo"
+        ok, reason = up.can_upgrade(tower.tiers, path_index)
+        if not ok:
+            return False, None, reason
+        cost = self.path_upgrade_cost(tower, path_index)
+        if tier == up.MAX_TIER:
+            owner = self.tier6_owner(tower.ttype)
+            if owner is not None:
+                return False, cost, "Ja existe um tier 6 deste tipo"
+        if self.gold < cost:
+            return False, cost, "Ouro insuficiente"
+        return True, cost, ""
+
+    def path_upgrade_cost(self, tower, path_index):
+        base = tower.next_tier_cost(path_index)
+        if base is None:
+            return None
+        return max(1, int(round(base * self.meta.upgrade_cost_mult())))
+
     def try_click_panel_upgrade(self, pos):
         """Processa um clique quando o painel esta em modo upgrade
         (uma torre do grid selecionada). Retorna True se o clique foi
@@ -182,16 +238,17 @@ class Game:
             self.selected_tower_cell = None
             return True
         tower = self.towers[cell]
-        for rect, aspect in rects:
+        for rect, path_index in rects:
             if rect.collidepoint(pos):
-                cost = int(round(tower.upgrade_cost(aspect) * self.meta.upgrade_cost_mult()))
-                cost = max(1, cost)
-                if self.gold >= cost:
+                ok, cost, reason = self.path_purchase_state(tower, path_index)
+                tx, ty = tower.grid_pos()
+                if ok:
                     self.gold -= cost
-                    tower.buy_upgrade(aspect)
-                    tx, ty = tower.grid_pos()
-                    from .config import UPGRADE_LABELS
-                    self.add_floating_text(tx, ty - 24, f"{UPGRADE_LABELS[aspect]} ++", COL_MERGE_GLOW)
+                    tower.buy_path(path_index)
+                    name = up.tier_def(tower.ttype, path_index, tower.tiers[path_index])["name"]
+                    self.add_floating_text(tx, ty - 24, name, COL_MERGE_GLOW)
+                elif reason:
+                    self.add_floating_text(tx, ty - 24, reason, (255, 140, 140))
                 return True
         area = tower_panel.panel_area_rect()
         area.x = self.tower_panel_x
@@ -313,20 +370,22 @@ class Game:
             if target_tower is tower:
                 pass
             elif target_tower.ttype == tower.ttype:
-                if target_tower.level == tower.level:
+                merged_tiers = [max(a, b) for a, b in
+                                zip(target_tower.tiers, tower.tiers)]
+                if target_tower.level == tower.level and up.is_legal_config(merged_tiers):
                     # MERGE! So ocorre quando as duas torres tem o MESMO
-                    # nivel: o nivel da torre resultante sobe em 1. Cada
-                    # aspecto de melhoria (dano/alcance/cadencia) comprado
-                    # no menu de upgrades fica com o MELHOR (maior) valor
-                    # entre as duas torres — ex.: lvl3 de alcance + lvl5
-                    # de alcance funde para lvl5 de alcance, nunca some.
+                    # nivel: o nivel resultante sobe em 1. Cada CAMINHO da
+                    # arvore fica com o maior tier entre as duas (nunca
+                    # soma) -- fundir uma 3-0-0 com uma 0-2-0 resulta numa
+                    # 3-2-0, que continua legal pelo crosspath.
+                    #
+                    # Se a combinacao violar o crosspath (ex.: 5-0-0 com
+                    # 0-5-0 daria 5-5-0), o merge e PROIBIDO e as torres
+                    # so trocam de lugar -- senao daria pra driblar a
+                    # regra mais importante da arvore fundindo torres.
                     new_level = target_tower.level + 1
-                    merged_upgrades = {
-                        aspect: max(target_tower.upgrades[aspect], tower.upgrades[aspect])
-                        for aspect in target_tower.upgrades
-                    }
                     target_tower.level = new_level
-                    target_tower.upgrades = merged_upgrades
+                    target_tower.tiers = merged_tiers
                     target_tower.recalc_stats()
                     del self.towers[origin]
                     cx, cy = target_tower.grid_pos()
@@ -397,14 +456,27 @@ class Game:
             self.wave_mgr.start_next_wave()
             self.recalc_tower_cost()
 
-        # torres
+        # torres (recebem o proprio Game como "world": e por ele que
+        # torres/projeteis/habilidades enxergam inimigos, projeteis e vfx)
         for t in self.towers.values():
-            t.update(dt, self.enemies, self.projectiles)
+            t.update(dt, self)
+
+        # habilidades tier 6: rodam DEPOIS das torres pra enxergarem o
+        # estado ja atualizado da pista neste frame
+        self.abilities.update(self, dt)
 
         # projeteis
         for p in self.projectiles:
-            p.update(dt, self.enemies)
+            p.update(dt, self)
         self.projectiles = [p for p in self.projectiles if p.alive]
+
+        # explosoes agendadas (secundarias/encadeadas) e efeitos visuais
+        combat.update_pending_blasts(self, dt)
+        self.vfx = vfx.update_vfx(self.vfx, dt)
+        if self.ability_banner is not None:
+            self.ability_banner[1] -= dt
+            if self.ability_banner[1] <= 0:
+                self.ability_banner = None
 
         # inimigos: primeiro avanca os que ainda estao vivos (para detectar
         # quem chega ao fim do caminho), depois processa TODOS os que
@@ -463,6 +535,9 @@ class Game:
         for p in self.projectiles:
             p.draw(self.screen, offset)
 
+        for v in self.vfx:
+            v.draw(self.screen, offset)
+
         board.draw_grid(self, self.screen)
 
         # torres (nao-arrastadas primeiro) -- desenhadas ordenadas por
@@ -495,8 +570,14 @@ class Game:
                 same_type = (target_here is not None and
                              target_here.ttype == self.dragging_tower.ttype and
                              target_here is not self.dragging_tower)
-                if same_type and target_here.level == self.dragging_tower.level:
-                    col = COL_MERGE_GLOW  # merge: mesmo tipo e mesmo nivel
+                merge_ok = False
+                if same_type:
+                    merged = [max(a, b) for a, b in
+                              zip(target_here.tiers, self.dragging_tower.tiers)]
+                    merge_ok = (target_here.level == self.dragging_tower.level
+                                and up.is_legal_config(merged))
+                if merge_ok:
+                    col = COL_MERGE_GLOW  # merge: mesmo tipo, mesmo nivel, crosspath valido
                 elif same_type:
                     col = COL_SWAP_GLOW  # mesmo tipo, nivel diferente: so troca de lugar
                 else:
