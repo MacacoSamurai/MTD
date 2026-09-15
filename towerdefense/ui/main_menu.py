@@ -6,6 +6,7 @@ so calculam geometria (usada tanto para desenhar quanto para testar
 cliques em game.py) e draw_*() cuida do desenho.
 """
 
+import math
 import pygame
 
 from ..config import (
@@ -14,6 +15,7 @@ from ..config import (
 )
 from ..fonts import get_font
 from .hud import draw_gem_icon
+from . import theme
 
 # cada item: (label, action). "action" e o que game.py usa para decidir
 # o que fazer no clique (ver handle_main_menu_click).
@@ -27,11 +29,11 @@ MENU_BUTTONS = [
 def button_rects():
     """Retorna lista de (rect, action) para os botoes do menu, empilhados
     verticalmente e centralizados na tela."""
-    w, h = 340, 60
-    gap = 22
+    w, h = 360, 62
+    gap = 20
     n = len(MENU_BUTTONS)
     total_h = n * h + (n - 1) * gap
-    start_y = HEIGHT // 2 - total_h // 2 + 40
+    start_y = HEIGHT // 2 - total_h // 2 + 50
     x = WIDTH // 2 - w // 2
     rects = []
     for i, (label, action) in enumerate(MENU_BUTTONS):
@@ -54,10 +56,28 @@ def help_panel_rect():
 # ----------------------------------------------------------------------
 # DESENHO
 # ----------------------------------------------------------------------
+def _draw_background(surf):
+    """Fundo com vinheta radial suave (mais claro no centro-topo, mais
+    escuro nas bordas) em vez de uma cor solida chapada, mais um
+    quadriculado bem discreto lembrando a grade do jogo."""
+    theme.vertical_gradient(surf, (0, 0, WIDTH, HEIGHT),
+                             theme.shade(COL_BG, 0.10), theme.shade(COL_BG, -0.35))
+
+    # quadriculado discreto (mesma escala da grade de jogo) so pra dar
+    # textura, bem apagado para nao competir com o texto
+    grid_col = (*theme.shade(COL_BG, 0.22), 60)
+    grid_surf = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    step = 72
+    for x in range(0, WIDTH, step):
+        pygame.draw.line(grid_surf, grid_col, (x, 0), (x, HEIGHT), 1)
+    for y in range(0, HEIGHT, step):
+        pygame.draw.line(grid_surf, grid_col, (0, y), (WIDTH, y), 1)
+    surf.blit(grid_surf, (0, 0))
+
+
 def _draw_decorative_towers(surf):
     """Pequena decoracao abstrata no fundo: circulos remetendo a torres e
     alcance, so para a tela de titulo nao ficar totalmente vazia."""
-    import math
     decos = [
         (140, 620, (110, 190, 255), 46),
         (WIDTH - 160, 660, (255, 140, 70), 58),
@@ -66,38 +86,53 @@ def _draw_decorative_towers(surf):
     ]
     for cx, cy, color, r in decos:
         ring = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
-        pygame.draw.circle(ring, (*color, 30), (r, r), r)
+        pygame.draw.circle(ring, (*color, 26), (r, r), r)
         pygame.draw.circle(ring, (*color, 130), (r, r), r, 2)
         surf.blit(ring, (cx - r, cy - r))
+        pygame.draw.circle(surf, theme.shade(color, -0.3), (cx, cy + 2), 9)
         pygame.draw.circle(surf, color, (cx, cy), 8)
 
 
 def draw_main_menu(game, surf):
-    surf.fill(COL_BG)
+    _draw_background(surf)
     _draw_decorative_towers(surf)
 
-    font_title = get_font(50, bold=True)
-    font_subtitle = get_font(18)
+    font_title = get_font(52, bold=True)
+    font_subtitle = get_font(18, bold=True)
 
+    title_center = (WIDTH // 2, HEIGHT // 2 - 210)
+    # sombra/glow do titulo: varias copias deslocadas em tom escuro atras
+    # do texto branco, pra dar profundidade sem precisar de fonte custom
+    shadow_txt = font_title.render("TOWER DEFENSE INFINITO", True, (0, 0, 0))
+    for dx, dy in ((3, 3), (0, 4)):
+        srect = shadow_txt.get_rect(center=(title_center[0] + dx, title_center[1] + dy))
+        surf.blit(shadow_txt, srect)
     title_txt = font_title.render("TOWER DEFENSE INFINITO", True, COL_WHITE)
-    trect = title_txt.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 210))
+    trect = title_txt.get_rect(center=title_center)
     surf.blit(title_txt, trect)
+    underline_y = trect.bottom + 4
+    pygame.draw.line(surf, COL_GOLD, (trect.centerx - 140, underline_y),
+                      (trect.centerx + 140, underline_y), 3)
 
-    sub_txt = font_subtitle.render("Merge das Torres", True, COL_GOLD)
-    srect = sub_txt.get_rect(center=(WIDTH // 2, trect.bottom + 12))
+    sub_txt = font_subtitle.render("MERGE DAS TORRES", True, COL_GOLD)
+    srect = sub_txt.get_rect(center=(WIDTH // 2, underline_y + 22))
     surf.blit(sub_txt, srect)
 
     mouse_pos = game.mouse_pos
-    font_btn = get_font(22, bold=True)
+    font_btn = get_font(23, bold=True)
     for rect, action in button_rects():
         hovered = rect.collidepoint(mouse_pos)
-        bg = (40, 48, 62) if hovered else COL_PANEL
-        pygame.draw.rect(surf, bg, rect, border_radius=12)
-        border_col = COL_GOLD if hovered else COL_GRID_BORDER
-        pygame.draw.rect(surf, border_col, rect, 2, border_radius=12)
         label = next(lbl for lbl, act in MENU_BUTTONS if act == action)
+        col = COL_RED if action == "quit" else COL_GOLD
+        base_fill = COL_PANEL if not hovered else theme.shade(COL_PANEL, 0.12)
+        theme.draw_panel(surf, rect, base_fill, border=col if hovered else COL_GRID_BORDER,
+                          radius=12, border_w=2 if not hovered else 3)
         txt = font_btn.render(label, True, COL_WHITE if hovered else COL_TEXT)
         surf.blit(txt, txt.get_rect(center=rect.center))
+        if hovered:
+            # pequena seta indicando o item ativo, reforca o hover alem da borda
+            tip = [(rect.x + 18, rect.centery - 7), (rect.x + 18, rect.centery + 7), (rect.x + 30, rect.centery)]
+            pygame.draw.polygon(surf, col, tip)
 
     # progresso permanente (gemas), visivel desde o menu principal porque
     # persiste entre partidas (ver Game.__init__: self.gems nao e resetado)
@@ -128,10 +163,7 @@ def draw_help_overlay(surf, mouse_pos):
     surf.blit(overlay, (0, 0))
 
     panel_rect = help_panel_rect()
-    panel = pygame.Surface((panel_rect.w, panel_rect.h), pygame.SRCALPHA)
-    pygame.draw.rect(panel, (20, 24, 34, 250), (0, 0, panel_rect.w, panel_rect.h), border_radius=16)
-    pygame.draw.rect(panel, (*COL_GOLD, 255), (0, 0, panel_rect.w, panel_rect.h), 3, border_radius=16)
-    surf.blit(panel, panel_rect.topleft)
+    theme.draw_panel(surf, panel_rect, (20, 24, 34), border=COL_GOLD, radius=16, border_w=3)
 
     font_title = get_font(24, bold=True)
     title_txt = font_title.render("Como Jogar", True, COL_GOLD)

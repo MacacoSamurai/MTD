@@ -14,18 +14,21 @@ progressao permanente via loja de gemas.
 
 ## Como jogar
 
-- Clique num slot vazio da grade para abrir o menu e **escolher o tipo**
-  de torre a comprar (custa ouro).
-- Clique e **arraste** uma torre sobre **outra torre do mesmo tipo** para
-  dar **merge**. So ocorre fusao se as duas tiverem **exatamente o mesmo
-  nivel** — nesse caso o resultado sobe um nivel, e cada melhoria (Dano/
-  Alcance/Cadencia) comprada fica com o **melhor valor entre as duas**
-  (ex.: alcance nv.3 + alcance nv.5 -> fusao fica com alcance nv.5). Se
-  os niveis forem diferentes, o merge e recusado e as torres apenas
-  **trocam de lugar** na grade. Nao ha nivel maximo.
-- Clique **rapido** (sem arrastar) em cima de uma torre para abrir o
-  **menu de melhorias**: gaste ouro para melhorar Dano, Alcance ou
-  Cadencia daquela torre especificamente.
+- Um **painel lateral fixo** (estilo Bloons TD) mostra todos os tipos de
+  torre disponiveis para compra. **Arraste** uma torre do painel ate um
+  slot vazio da grade para compra-la (custa ouro). Dois **cliques
+  rapidos** no mesmo card tambem compram, colocando a torre automaticamente
+  no primeiro slot vazio disponivel. O painel pode ser aberto/fechado pela
+  abinha na borda dele ou pela tecla **T**; ele fica sobreposto na frente
+  da grade e nunca muda o tamanho dela.
+- Clique e **arraste** uma torre ja colocada sobre **outra torre do mesmo
+  tipo** para dar **merge**. Se as duas tiverem o mesmo nivel, o resultado
+  sobe um nivel. Se os niveis forem diferentes, o nivel mais alto persiste.
+  Nao ha nivel maximo.
+- Clique **rapido** (sem arrastar) em cima de uma torre ja colocada para
+  selecionar ela: o painel lateral passa a mostrar as **melhorias**
+  daquela torre (gaste ouro para melhorar Dano, Alcance ou Cadencia).
+  Use o botao "Voltar" no painel para sair desse modo.
 - Ondas infinitas de inimigos avancam pelo caminho, ficando mais dificeis
   a cada onda. A cada 10 ondas aparece um **boss**, que solta **gemas**
   ao morrer.
@@ -40,6 +43,7 @@ progressao permanente via loja de gemas.
 | Mouse esquerdo       | Comprar / arrastar / soltar torres / pular onda / abrir loja de gemas |
 | ESPACO               | Iniciar a proxima onda manualmente                                   |
 | N                    | Pular a onda atual (ganha ouro extra, antecipa a proxima onda)        |
+| T                    | Abrir/fechar o painel lateral de torres                              |
 | G                    | Abrir/fechar a loja de gemas                                          |
 | P                    | Pausar/despausar                                                     |
 | R                    | Reiniciar apos game over (gemas e melhorias permanentes persistem)    |
@@ -85,11 +89,11 @@ tower_defense_project/
     │   └── meta_upgrades.py        # MetaUpgrades: loja de gemas (progressao permanente)
     └── ui/
         ├── __init__.py
-        ├── main_menu.py               # tela de titulo (Jogar / Como Jogar / Sair)
-        ├── map_menu.py                # tela de selecao de mapa
-        ├── board.py                   # desenho do caminho e da grade
-        ├── hud.py                     # HUD (ouro/vidas/onda), legenda, tela de game over
-        └── menus.py                   # menu de compra, menu de upgrade, loja de gemas, tooltip
+        ├── board.py                 # desenho do caminho e da grade
+        ├── hud.py                    # HUD (ouro/vidas/onda), legenda, tela de game over
+        ├── map_menu.py                # menu de selecao de mapa
+        ├── tower_panel.py             # painel lateral fixo: compra de torres + upgrade da torre selecionada
+        └── menus.py                  # loja de gemas, tooltip de alcance
 ```
 
 ### Por que essa divisao?

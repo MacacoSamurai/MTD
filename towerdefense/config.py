@@ -9,7 +9,6 @@ balancear o jogo sem precisar mexer no codigo de comportamento.
 # ----------------------------------------------------------------------------
 # JANELA / GRADE
 # ----------------------------------------------------------------------------
-WIDTH, HEIGHT = 1280, 800
 FPS = 60
 
 # A grade cobre toda a area de jogo (o caminho serpenteia por dentro dela).
@@ -18,12 +17,32 @@ GRID_COLS = 15
 GRID_ROWS = 9
 CELL_SIZE = 72
 TOP_HUD_HEIGHT = 90
-BOTTOM_HUD_HEIGHT = 70
+# Nao ha mais barra/legenda no rodape (removida a pedido: o jogo so tinha
+# dicas de tecla + legenda de cores de nivel ali). Mantido como constante
+# (em vez de apagar todo mundo que referencia "rodape") para o dia em que
+# algo precisar de novo de uma faixa inferior - hoje vale 0.
+BOTTOM_HUD_HEIGHT = 0
+
+# A altura da janela e derivada da grade (nao um numero solto): assim o
+# grid nunca fica cortado/sobreposto por uma eventual barra inferior.
+WIDTH = 1280
+HEIGHT = TOP_HUD_HEIGHT + GRID_ROWS * CELL_SIZE + BOTTOM_HUD_HEIGHT
 
 GRID_ORIGIN_X = (WIDTH - GRID_COLS * CELL_SIZE) // 2
 GRID_ORIGIN_Y = TOP_HUD_HEIGHT
 
 PANEL_WIDTH = WIDTH  # mantido por compatibilidade com HUD que usa toda a largura
+
+# ----------------------------------------------------------------------------
+# PAINEL LATERAL DE TORRES (estilo Bloons TD)
+# Fica sobreposto na frente do grid (nao redimensiona a area de jogo).
+# Pode abrir/fechar deslizando; quando fechado fica totalmente fora da tela.
+# ----------------------------------------------------------------------------
+TOWER_PANEL_WIDTH = 230
+TOWER_PANEL_CARD_H = 96
+TOWER_PANEL_CARD_GAP = 10
+TOWER_PANEL_SLIDE_SPEED = 1900  # px/s da animacao de abrir/fechar
+TOWER_PANEL_DOUBLE_CLICK_MS = 400  # janela para o "2 cliques = auto-coloca"
 
 # ----------------------------------------------------------------------------
 # ECONOMIA / REGRAS GERAIS
@@ -98,6 +117,7 @@ TOWER_TYPES = {
         "base_range": 120, "base_damage": 14, "base_rate": 0.70,
         "splash_from_lvl": 3, "splash_base": 24, "splash_step": 6,
         "proj_speed": 420, "proj_shape": "circle",
+        "tower_shape": "circle",
     },
     "flecha": {
         "label": "Torre de Flechas",
@@ -106,6 +126,7 @@ TOWER_TYPES = {
         "base_range": 130, "base_damage": 6, "base_rate": 0.28,
         "splash_from_lvl": None, "splash_base": 0, "splash_step": 0,
         "proj_speed": 620, "proj_shape": "arrow",
+        "tower_shape": "triangle",
     },
     "gelo": {
         "label": "Torre de Gelo",
@@ -115,6 +136,7 @@ TOWER_TYPES = {
         "splash_from_lvl": 4, "splash_base": 30, "splash_step": 8,
         "proj_speed": 380, "proj_shape": "shard",
         "always_slow": (0.55, 1.0),
+        "tower_shape": "hexagon",
     },
     "canhao_pesado": {
         "label": "Canhao Pesado",
@@ -123,6 +145,7 @@ TOWER_TYPES = {
         "base_range": 135, "base_damage": 46, "base_rate": 1.35,
         "splash_from_lvl": 1, "splash_base": 34, "splash_step": 7,
         "proj_speed": 340, "proj_shape": "square",
+        "tower_shape": "square",
     },
     "sniper": {
         "label": "Sniper",
@@ -132,6 +155,7 @@ TOWER_TYPES = {
         "splash_from_lvl": None, "splash_base": 0, "splash_step": 0,
         "proj_speed": 900, "proj_shape": "line",
         "armor_pierce": True,
+        "tower_shape": "diamond",
     },
 }
 TOWER_TYPE_KEYS = list(TOWER_TYPES.keys())

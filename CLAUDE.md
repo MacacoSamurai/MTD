@@ -69,12 +69,17 @@ towerdefense/
 │   │                            # bosses periodicos, skip_wave() (empilha ondas)
 │   └── meta_upgrades.py        # MetaUpgrades: niveis/custo/efeito da loja de gemas
 └── ui/                         # SO desenho + geometria de clique; nao guarda estado
+    ├── theme.py                 # helpers visuais reaproveitados (sombra suave,
+    │                              # paineis com degrade/"elevacao", icones de
+    │                              # moeda/coracao/gema, gradiente vertical, botao
+    │                              # generico com hover) -- usado por quase todo
+    │                              # o resto de ui/ pra manter o visual consistente
     ├── main_menu.py             # tela de titulo (ver secao de estados acima)
     ├── map_menu.py              # tela de selecao de mapa
     ├── board.py                 # grade + caminho
-    ├── hud.py                   # HUD topo/rodape, legenda, tela de game over
-    └── menus.py                 # popup de compra de torre, popup de upgrade,
-                                  # loja de gemas (meta_shop), tooltip de alcance
+    ├── hud.py                   # HUD do topo, tela de game over
+    ├── tower_panel.py           # painel lateral fixo (compra + upgrade de torre)
+    └── menus.py                 # loja de gemas (meta_shop), tooltip de alcance
 ```
 
 ### Convencao importante: `ui/` e "burro" de proposito
@@ -136,6 +141,34 @@ Se for adicionar um menu/tela nova, siga esse padrao (veja
   display disponivel, com `SDL_VIDEODRIVER=dummy python main.py` /
   chamando `Game()` e `.draw()` direto num script, como foi feito para
   validar o menu principal).
+- **`HEIGHT` e derivado da grade, nao um numero solto**: `HEIGHT =
+  TOP_HUD_HEIGHT + GRID_ROWS * CELL_SIZE + BOTTOM_HUD_HEIGHT` em
+  `config.py`. Ja existiu um bug em que `HEIGHT` fixo (800) era 8px
+  menor que essa soma, e a ultima fileira de slots ficava escondida
+  atras da barra inferior. Se mexer em `GRID_ROWS`/`CELL_SIZE`/altura
+  das barras, `HEIGHT` se ajusta sozinho -- nao hardcode de volta.
+  `BOTTOM_HUD_HEIGHT` hoje vale 0 (nao ha mais barra/legenda no
+  rodape do mapa, removida a pedido) - a constante ficou so pra quem
+  precisar reativar uma faixa inferior no futuro.
+- **Cada tipo de torre tem uma silhueta propria** (`tower_shape` em
+  `TOWER_TYPES`, config.py: "circle", "triangle", "hexagon", "square"
+  ou "diamond"), desenhada em `Tower.draw` (entities/tower.py) e
+  espelhada nos icones de `ui/theme.draw_shape_icon` (cards do painel,
+  tooltip). E um campo SEPARADO de `proj_shape` (formato do projetil,
+  usado em entities/projectile.py) -- nao reusar um pelo outro. Ao
+  criar um tipo de torre novo, defina os dois.
+- **`towerdefense/ui/__init__.py` precisa importar TODO modulo novo de
+  ui/**: ja aconteceu de `main_menu.py` existir e ser usado em
+  `game.py` sem estar nesse `__init__.py` nem no import de `game.py`,
+  o que quebrava o jogo assim que abria (estado inicial e
+  `"main_menu"`). Ao criar um modulo de ui/ novo, adicione-o em ambos
+  os lugares.
+- **Paineis/HUD usam `ui/theme.py` para consistencia visual**: sombra
+  suave (`draw_shadow`), painel arredondado com leve degrade
+  (`draw_panel`), gradiente vertical (`vertical_gradient`) e um botao
+  generico com hover (`button`). Ao criar um popup/card novo, prefira
+  reaproveitar esses helpers em vez de desenhar retangulos chapados na
+  mao, para manter o mesmo acabamento em todo o jogo.
 
 ## Idioma e estilo
 
