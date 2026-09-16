@@ -29,7 +29,25 @@ class Game:
     def __init__(self):
         pygame.init()
         pygame.display.set_caption("Tower Defense Infinito - Merge das Torres")
-        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        # `self.screen` e a JANELA de verdade (redimensionavel pelo usuario
+        # ou em tela cheia); `self.canvas` e uma superficie interna de
+        # resolucao FIXA (WIDTH x HEIGHT), a mesma que todo o resto do jogo
+        # (ui/, entities/, systems/) sempre desenhou. Nenhum outro modulo
+        # precisa saber que a janela mudou de tamanho: eles continuam
+        # desenhando no `canvas` logico normalmente; so aqui em Game a
+        # gente escala esse canvas pro tamanho real da janela na hora do
+        # flip (letterbox, preservando proporcao) e convertemos cliques/
+        # posicao do mouse de "pixel da janela" pra "pixel logico do
+        # canvas" antes de qualquer outro codigo ver essas coordenadas.
+        self.canvas = pygame.Surface((WIDTH, HEIGHT))
+        self.windowed_size = (WIDTH, HEIGHT)  # ultimo tamanho em modo janela (p/ restaurar ao sair da tela cheia)
+        self.is_fullscreen = False
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
+        # `self.render_rect` e onde o canvas logico cai dentro da janela
+        # real (a area "letterboxed"); recalculado sempre que a janela
+        # muda de tamanho. Comeca preenchendo a janela 1:1.
+        self.render_rect = pygame.Rect(0, 0, WIDTH, HEIGHT)
+        self._update_render_rect()
         self.clock = pygame.time.Clock()
         # gemas e melhorias permanentes NAO sao zeradas pelo reset() normal:
         # elas representam progresso de longo prazo entre tentativas,
@@ -48,6 +66,59 @@ class Game:
         self.selected_map_id = DEFAULT_MAP_ID
         self.map_path = MapPath(self.selected_map_id)
         self.reset()
+
+    # ------------------------------------------------------------------
+    # JANELA / TELA CHEIA / ESCALA
+    # ------------------------------------------------------------------
+    def _update_render_rect(self):
+        """Recalcula onde o canvas logico (WIDTH x HEIGHT fixo) cai dentro
+        da janela real, preservando a proporcao (letterbox) -- chamado
+        sempre que a janela muda de tamanho (redimensionar ou F11)."""
+        win_w, win_h = self.screen.get_size()
+        scale = min(win_w / WIDTH, win_h / HEIGHT)
+        scale = max(scale, 0.01)  # nunca zero/negativo (janela minimizada etc.)
+        draw_w = int(WIDTH * scale)
+        draw_h = int(HEIGHT * scale)
+        off_x = (win_w - draw_w) // 2
+        off_y = (win_h - draw_h) // 2
+        self.render_rect = pygame.Rect(off_x, off_y, draw_w, draw_h)
+
+    def handle_resize(self, size):
+        """Chamado em VIDEORESIZE: so recalcula a area de escala. O canvas
+        logico (WIDTH x HEIGHT) nunca muda -- por isso nenhum outro modulo
+        do jogo (grid, HUD, paineis) precisa saber que a janela mudou."""
+        if not self.is_fullscreen:
+            self.windowed_size = size
+        self._update_render_rect()
+
+    def toggle_fullscreen(self):
+        """F11: alterna entre janela livre (redimensionavel) e tela cheia,
+        sempre preservando o ultimo tamanho de janela pra restaurar depois."""
+        if self.is_fullscreen:
+            self.screen = pygame.display.set_mode(self.windowed_size, pygame.RESIZABLE)
+            self.is_fullscreen = False
+        else:
+            self.windowed_size = self.screen.get_size()
+            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            self.is_fullscreen = True
+        self._update_render_rect()
+
+    def window_to_canvas(self, pos):
+        """Converte uma posicao em pixel da JANELA (o que pygame reporta em
+        eventos de mouse e em get_pos) pra pixel do canvas LOGICO (o
+        sistema de coordenadas que board/hud/tower_panel/etc sempre
+        usaram). Fora da area util (nas barras pretas do letterbox), o
+        ponto e grudado na borda mais proxima do canvas -- assim um clique
+        levemente fora ainda resolve pra algo coerente em vez de vazar
+        coordenada negativa/gigante pro resto do jogo."""
+        rect = self.render_rect
+        if rect.width <= 0 or rect.height <= 0:
+            return (0, 0)
+        rel_x = (pos[0] - rect.x) / rect.width
+        rel_y = (pos[1] - rect.y) / rect.height
+        rel_x = min(max(rel_x, 0.0), 1.0)
+        rel_y = min(max(rel_y, 0.0), 1.0)
+        return (rel_x * WIDTH, rel_y * HEIGHT)
 
     def start_map(self, map_id):
         """Chamado ao clicar num card do menu de mapas: define o mapa
@@ -476,7 +547,7 @@ class Game:
     # UPDATE
     # ------------------------------------------------------------------
     def update(self, dt):
-        self.mouse_pos = pygame.mouse.get_pos()
+        self.mouse_pos = self.window_to_canvas(pygame.mouse.get_pos())
         if self.state in ("map_select", "main_menu"):
             return
         self.hovered_cell = self.cell_from_pixel(*self.mouse_pos)
@@ -552,30 +623,34 @@ class Game:
     # DESENHO
     # ------------------------------------------------------------------
     def draw(self):
+        # Tudo desenha no `canvas` logico (resolucao fixa WIDTH x HEIGHT) --
+        # exatamente como antes, so que o alvo do blit deixou de ser a
+        # janela e passou a ser esse buffer interno. `_present()` no final
+        # escala o canvas inteiro pro tamanho real da janela.
         if self.state == "main_menu":
-            main_menu.draw_main_menu(self, self.screen)
-            pygame.display.flip()
+            main_menu.draw_main_menu(self, self.canvas)
+            self._present()
             return
 
         if self.state == "map_select":
-            map_menu.draw_map_menu(self, self.screen)
-            pygame.display.flip()
+            map_menu.draw_map_menu(self, self.canvas)
+            self._present()
             return
 
-        self.screen.fill(COL_BG)
+        self.canvas.fill(COL_BG)
         offset = (0, 0)
-        board.draw_path(self.screen, offset, self.map_path)
+        board.draw_path(self.canvas, offset, self.map_path)
 
         for e in self.enemies:
-            e.draw(self.screen, offset)
+            e.draw(self.canvas, offset)
 
         for p in self.projectiles:
-            p.draw(self.screen, offset)
+            p.draw(self.canvas, offset)
 
         for v in self.vfx:
-            v.draw(self.screen, offset)
+            v.draw(self.canvas, offset)
 
-        board.draw_grid(self, self.screen)
+        board.draw_grid(self, self.canvas)
 
         # torres (nao-arrastadas primeiro) -- desenhadas ordenadas por
         # ROW (linha na grade), nao pela ordem de insercao no dict. Sem
@@ -587,9 +662,9 @@ class Game:
         # em jogos top-down como esse.
         for cell, t in sorted(self.towers.items(), key=lambda item: item[1].row):
             if t is not self.dragging_tower:
-                t.draw(self.screen, None, False)
+                t.draw(self.canvas, None, False)
 
-        menus.draw_tower_range_hover(self, self.screen, offset)
+        menus.draw_tower_range_hover(self, self.canvas, offset)
 
         # torre sendo arrastada por cima de tudo -- o destaque da celula
         # alvo (retangulo colorido indicando merge/troca) precisa ser
@@ -619,8 +694,8 @@ class Game:
                     col = COL_SWAP_GLOW  # mesmo tipo, nivel diferente: so troca de lugar
                 else:
                     col = (120, 120, 130)
-                pygame.draw.rect(self.screen, col, rect.inflate(-4, -4), 3, border_radius=8)
-            self.dragging_tower.draw(self.screen, self.mouse_pos, True)
+                pygame.draw.rect(self.canvas, col, rect.inflate(-4, -4), 3, border_radius=8)
+            self.dragging_tower.draw(self.canvas, self.mouse_pos, True)
 
         # preview da celula alvo enquanto arrasta uma torre nova do painel
         if self.dragging_from_panel is not None:
@@ -631,11 +706,11 @@ class Game:
                 rect = pygame.Rect(x, y, CELL_SIZE, CELL_SIZE)
                 valid = cell not in self.towers and cell not in self.map_path.cell_set
                 col = COL_MERGE_GLOW if valid else (200, 80, 80)
-                pygame.draw.rect(self.screen, col, rect.inflate(-4, -4), 3, border_radius=8)
+                pygame.draw.rect(self.canvas, col, rect.inflate(-4, -4), 3, border_radius=8)
 
-        tower_panel.draw_tower_panel(self, self.screen)
+        tower_panel.draw_tower_panel(self, self.canvas)
         if self.dragging_from_panel is not None:
-            tower_panel.draw_dragged_card_ghost(self, self.screen)
+            tower_panel.draw_dragged_card_ghost(self, self.canvas)
 
         # floating texts
         font_ft = get_font(16, bold=True)
@@ -643,16 +718,29 @@ class Game:
             alpha = max(0, min(255, int(255 * life)))
             surf = font_ft.render(text, True, color)
             surf.set_alpha(alpha)
-            self.screen.blit(surf, (x - surf.get_width() / 2, y))
+            self.canvas.blit(surf, (x - surf.get_width() / 2, y))
 
-        hud.draw_hud(self, self.screen)
+        hud.draw_hud(self, self.canvas)
 
         # loja de gemas: por cima de absolutamente tudo, inclusive HUD
-        menus.draw_meta_shop(self, self.screen)
+        menus.draw_meta_shop(self, self.canvas)
 
         if self.game_over:
-            hud.draw_game_over(self, self.screen)
+            hud.draw_game_over(self, self.canvas)
 
+        self._present()
+
+    def _present(self):
+        """Escala o canvas logico (resolucao fixa) pro tamanho real da
+        janela e manda pra tela. Fora da area escalada (letterbox), pinta
+        de preto -- evita "lixo" do frame anterior nas bordas quando a
+        janela tem proporcao diferente da do canvas."""
+        self.screen.fill((0, 0, 0))
+        if self.render_rect.width > 0 and self.render_rect.height > 0:
+            scaled = pygame.transform.smoothscale(
+                self.canvas, (self.render_rect.width, self.render_rect.height)
+            )
+            self.screen.blit(scaled, self.render_rect.topleft)
         pygame.display.flip()
 
     # ------------------------------------------------------------------
@@ -667,8 +755,16 @@ class Game:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                elif event.type == pygame.VIDEORESIZE:
+                    # janela livre foi redimensionada (arrastando a borda,
+                    # maximizando etc.) -- so recalcula a area de escala;
+                    # o canvas logico continua com a mesma resolucao fixa.
+                    if not self.is_fullscreen:
+                        self.handle_resize(event.size)
                 elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE and self.state == "main_menu" and self.show_help:
+                    if event.key == pygame.K_F11:
+                        self.toggle_fullscreen()
+                    elif event.key == pygame.K_ESCAPE and self.state == "main_menu" and self.show_help:
                         self.show_help = False  # ESC fecha o "Como Jogar" antes de sair
                     elif event.key == pygame.K_ESCAPE and self.state == "map_select":
                         self.state = "main_menu"  # ESC volta ao menu principal
@@ -702,15 +798,20 @@ class Game:
                         self.dragging_from_panel = None
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:
+                        # pos convertida de pixel da JANELA pra pixel do
+                        # canvas logico -- daqui pra baixo, todo o resto do
+                        # jogo (rects de UI, grade, etc.) continua raciocinando
+                        # nas mesmas coordenadas fixas de sempre.
+                        pos = self.window_to_canvas(event.pos)
                         if self.state == "main_menu":
                             if self.show_help:
-                                if main_menu.help_close_rect().collidepoint(event.pos):
+                                if main_menu.help_close_rect().collidepoint(pos):
                                     self.show_help = False
-                                elif not main_menu.help_panel_rect().collidepoint(event.pos):
+                                elif not main_menu.help_panel_rect().collidepoint(pos):
                                     self.show_help = False
                             else:
                                 for rect, action in main_menu.button_rects():
-                                    if rect.collidepoint(event.pos):
+                                    if rect.collidepoint(pos):
                                         if action == "play":
                                             self.state = "map_select"
                                         elif action == "help":
@@ -720,21 +821,21 @@ class Game:
                                         break
                         elif self.state == "map_select":
                             for rect, map_id in map_menu.map_card_rects():
-                                if rect.collidepoint(event.pos):
+                                if rect.collidepoint(pos):
                                     self.start_map(map_id)
                                     break
                         elif self.meta_shop_open:
-                            self.handle_meta_shop_click(event.pos)
-                        elif self.gem_button_rect is not None and self.gem_button_rect.collidepoint(event.pos):
+                            self.handle_meta_shop_click(pos)
+                        elif self.gem_button_rect is not None and self.gem_button_rect.collidepoint(pos):
                             self.meta_shop_open = True
                             self.selected_tower_cell = None
-                        elif self.skip_button_rect is not None and self.skip_button_rect.collidepoint(event.pos):
+                        elif self.skip_button_rect is not None and self.skip_button_rect.collidepoint(pos):
                             self.skip_current_wave()
                         else:
-                            self.handle_click_down(event.pos)
+                            self.handle_click_down(pos)
                 elif event.type == pygame.MOUSEBUTTONUP:
                     if event.button == 1 and self.state not in ("map_select", "main_menu"):
-                        self.handle_click_up(event.pos)
+                        self.handle_click_up(self.window_to_canvas(event.pos))
 
             self.update(dt)
             self.draw()
