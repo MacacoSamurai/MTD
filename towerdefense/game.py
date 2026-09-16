@@ -226,18 +226,42 @@ class Game:
             return None
         return max(1, int(round(base * self.meta.upgrade_cost_mult())))
 
+    def selected_tower(self):
+        """Torre cujo painel de upgrade esta aberto, ou None se o painel
+        esta em modo LOJA.
+
+        UNICA fonte de verdade do modo do painel: desenho
+        (ui/tower_panel.py) e clique (handle_click_down) chamam esta
+        funcao, nunca leem `selected_tower_cell` cru. Ja existiu um bug em
+        que os dois discordavam: se a torre selecionada saia da celula
+        (merge ou simples mover de lugar), `selected_tower_cell` ficava
+        apontando pra uma celula vazia; o painel DESENHAVA a loja (porque
+        testava `in towers`) mas o clique entrava no ramo de upgrade
+        (porque testava so `is not None`) e era engolido -- os cards de
+        compra apareciam e nao respondiam, sem comprar nem descontar ouro.
+        Aqui a selecao obsoleta e limpa na hora, entao os dois lados sempre
+        veem o mesmo modo.
+        """
+        cell = self.selected_tower_cell
+        if cell is None:
+            return None
+        tower = self.towers.get(cell)
+        if tower is None:
+            self.selected_tower_cell = None  # torre saiu da celula: volta pra loja
+            return None
+        return tower
+
     def try_click_panel_upgrade(self, pos):
         """Processa um clique quando o painel esta em modo upgrade
         (uma torre do grid selecionada). Retorna True se o clique foi
         consumido (dentro do painel)."""
-        cell = self.selected_tower_cell
-        if cell not in self.towers:
+        tower = self.selected_tower()
+        if tower is None:
             return False
         rects, back_rect = tower_panel.upgrade_button_rects(self.tower_panel_x)
         if back_rect.collidepoint(pos):
             self.selected_tower_cell = None
             return True
-        tower = self.towers[cell]
         for rect, path_index in rects:
             if rect.collidepoint(pos):
                 ok, cost, reason = self.path_purchase_state(tower, path_index)
@@ -294,12 +318,16 @@ class Game:
             self.toggle_tower_panel()
             return
 
-        # painel aberto (ou animando pra fora): checa cliques nele primeiro
+        # painel aberto (ou animando pra fora): checa cliques nele primeiro.
+        # O modo vem de selected_tower() (mesma funcao que o desenho usa),
+        # senao o painel pode mostrar a loja enquanto o clique vai parar no
+        # tratamento de upgrade e some sem efeito nenhum.
         if self.tower_panel_x < WIDTH:
-            if self.selected_tower_cell is not None:
-                if self.try_click_panel_upgrade(pos):
-                    return
-            elif self.try_click_panel_shop(pos):
+            if self.selected_tower() is not None:
+                consumed = self.try_click_panel_upgrade(pos)
+            else:
+                consumed = self.try_click_panel_shop(pos)
+            if consumed:
                 return
 
         cell = self.cell_from_pixel(*pos)
@@ -388,6 +416,9 @@ class Game:
                     target_tower.tiers = merged_tiers
                     target_tower.recalc_stats()
                     del self.towers[origin]
+                    if self.selected_tower_cell == origin:
+                        # a selecao segue a torre resultante do merge
+                        self.selected_tower_cell = cell
                     cx, cy = target_tower.grid_pos()
                     self.add_floating_text(cx, cy - 20, f"MERGE! Nv.{new_level}", COL_MERGE_GLOW)
                 else:
@@ -398,6 +429,10 @@ class Game:
                     tower.col, tower.row = cell
                     self.towers[origin] = target_tower
                     self.towers[cell] = tower
+                    if self.selected_tower_cell == origin:
+                        self.selected_tower_cell = cell
+                    elif self.selected_tower_cell == cell:
+                        self.selected_tower_cell = origin
             else:
                 # tipos diferentes: nao faz nada, volta pro lugar
                 pass
@@ -406,6 +441,8 @@ class Game:
             del self.towers[origin]
             tower.col, tower.row = cell
             self.towers[cell] = tower
+            if self.selected_tower_cell == origin:
+                self.selected_tower_cell = cell
 
         self.dragging_tower = None
         self.drag_origin = None
