@@ -25,7 +25,7 @@ from ..config import (
     TOWER_PANEL_WIDTH, TOWER_PANEL_CARD_H, TOWER_PANEL_CARD_GAP,
     TOWER_TYPES, TOWER_TYPE_KEYS,
     COL_WHITE, COL_RED, COL_GOLD, COL_GREEN, COL_TEXT_DIM, COL_PANEL,
-    COL_GRID_BORDER,
+    COL_GRID_BORDER, TOWER_SELL_REFUND_RATIO,
 )
 from ..fonts import get_font
 from ..entities.tower import tower_color, tower_name, draw_tower_shape
@@ -78,23 +78,33 @@ def upgrade_header_h():
 
 
 def upgrade_button_rects(panel_x):
-    """Retorna (rects, back_rect) para o modo de upgrade dentro do painel.
+    """Retorna (rects, back_rect, sell_rect) para o modo de upgrade dentro
+    do painel.
 
     `rects` e uma lista de (rect, path_index) -- um card por CAMINHO da
     arvore de upgrades (ver towerdefense/upgrades.py). Substituiu os tres
     botoes fixos de dano/alcance/cadencia da versao antiga.
+
+    `back_rect` e `sell_rect` dividem a mesma linha do topo (voltar pra
+    loja / vender a torre), lado a lado, pra nao precisar abrir espaco
+    novo no painel nem empurrar os cards de caminho pra baixo --
+    `upgrade_header_h()` continua valendo sem alteracao.
     """
     area = panel_area_rect()
     area.x = panel_x
-    back_rect = pygame.Rect(area.x + 12, area.y + 12, area.w - 24, 30)
     w = area.w - 24
+    gap = 8
+    back_w = int(w * 0.58)
+    back_rect = pygame.Rect(area.x + 12, area.y + 12, back_w, 30)
+    sell_rect = pygame.Rect(back_rect.right + gap, area.y + 12,
+                             w - back_w - gap, 30)
     start_y = area.y + upgrade_header_h()
     rects = []
     for i in range(3):
         r = pygame.Rect(area.x + 12, start_y + i * (PATH_CARD_H + PATH_CARD_GAP),
                         w, PATH_CARD_H)
         rects.append((r, i))
-    return rects, back_rect
+    return rects, back_rect, sell_rect
 
 
 # ----------------------------------------------------------------------
@@ -250,7 +260,7 @@ def _draw_upgrade_mode(game, surf, panel_x):
     tower = game.selected_tower()
     if tower is None:
         return
-    rects, back_rect = upgrade_button_rects(panel_x)
+    rects, back_rect, sell_rect = upgrade_button_rects(panel_x)
     area = panel_area_rect()
     area.x = panel_x
 
@@ -261,6 +271,18 @@ def _draw_upgrade_mode(game, surf, panel_x):
     font_back = get_font(13, bold=True)
     back_txt = font_back.render("< Voltar", True, COL_WHITE)
     surf.blit(back_txt, back_txt.get_rect(center=back_rect.center))
+
+    # botao "vender": devolve TOWER_SELL_REFUND_RATIO do ouro investido
+    # (compra + upgrades de caminho + o que veio de merges, ver
+    # Tower.invested / Game.sell_tower) -- mostra o valor de venda direto
+    # no botao pra nao precisar abrir outro menu pra saber quanto volta.
+    refund = int(round(tower.invested * TOWER_SELL_REFUND_RATIO))
+    sell_hovered = sell_rect.collidepoint(game.mouse_pos)
+    theme.draw_panel(surf, sell_rect, (28, 40, 30) if not sell_hovered else (36, 52, 38),
+                      border=COL_GREEN, radius=6, shadow=False)
+    font_sell = get_font(12, bold=True)
+    sell_txt = font_sell.render(f"Vender {refund}g", True, COL_WHITE)
+    surf.blit(sell_txt, sell_txt.get_rect(center=sell_rect.center))
 
     # cabecalho: torre de verdade (com cano apontando pra baixo, que e a
     # direcao com mais espaco livre aqui), nome da especializacao e a

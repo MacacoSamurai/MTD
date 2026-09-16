@@ -318,12 +318,18 @@ class Tower:
     e uma torre de nivel 4 com os mods dos 7 upgrades comprados.
     """
 
-    def __init__(self, col, row, ttype="canhao", level=1, tiers=None):
+    def __init__(self, col, row, ttype="canhao", level=1, tiers=None, invested=0):
         self.col = col
         self.row = row
         self.ttype = ttype
         self.level = level
         self.tiers = list(tiers) if tiers else [0, 0, 0]
+        # ouro total gasto nesta torre (compra + upgrades de caminho +, em
+        # merges, o investimento da torre absorvida) -- e sobre isso que
+        # `Game.sell_tower` calcula o reembolso ao vender. Nao inclui o
+        # custo de compra caso a torre ja nasca com nivel > 1 por meta
+        # upgrade (esse bonus e de graca, entao nao teria por que "vender").
+        self.invested = invested
         self.cooldown = 0.0
         self.target = None
         # rajada: tiros extras do MESMO ataque, disparados com um
