@@ -223,55 +223,85 @@ ENEMY_TYPES = {
 # (o recurso mais raro/valioso, obtido matando bosses). Cada upgrade tem
 # niveis, custo crescente em gemas, e afeta o jogo inteiro (nao uma
 # torre especifica).
+#
+# Balanceamento: gemas sao raras (poucas por boss), entao cada nivel
+# precisa custar gemas de verdade -- nao mais 1-3 gemas por compra.
+# `max_level: None` == sem teto (upgrade infinito); quando usado, o
+# proprio `effect_per_level` costuma ser consumido de forma nao-linear
+# pelo metodo em MetaUpgrades (ver systems/meta_upgrades.py) em vez de
+# so multiplicar, pra nao explodir com nivel alto.
 # ----------------------------------------------------------------------------
 META_UPGRADE_DEFS = {
     "gold_gain": {
         "label": "Ganho de Ouro",
         "desc": "Aumenta todo ouro recebido ao abater inimigos.",
         "icon_color": (255, 210, 90),
-        "base_cost": 1, "cost_step": 1,
-        "effect_per_level": 0.12,  # +12% por nivel
-        "max_level": 20,
+        "base_cost": 4, "cost_step": 3,
+        "effect_per_level": 0.10,  # +10% por nivel
+        "max_level": 15,
     },
     "start_level": {
         "label": "Nivel Inicial das Torres",
         "desc": "Toda torre nova ja nasce em um nivel mais alto.",
         "icon_color": (140, 220, 255),
-        "base_cost": 3, "cost_step": 2,
+        "base_cost": 10, "cost_step": 8,
         "effect_per_level": 1,  # +1 nivel inicial por ponto
-        "max_level": 8,
+        "max_level": 6,
     },
     "tower_cost": {
         "label": "Desconto em Torres",
         "desc": "Reduz o preco de compra de novas torres.",
         "icon_color": (140, 255, 170),
-        "base_cost": 2, "cost_step": 1,
-        "effect_per_level": 0.06,  # -6% de custo por nivel
-        "max_level": 10,
+        "base_cost": 6, "cost_step": 4,
+        "effect_per_level": 0.05,  # -5% de custo por nivel
+        "max_level": 9,
     },
     "starting_gold": {
         "label": "Ouro Inicial",
         "desc": "Comeca cada partida com mais ouro no bolso.",
         "icon_color": (255, 180, 60),
-        "base_cost": 2, "cost_step": 1,
-        "effect_per_level": 50,  # +50 de ouro inicial por ponto
+        "base_cost": 5, "cost_step": 3,
+        "effect_per_level": 40,  # +40 de ouro inicial por ponto
         "max_level": 10,
     },
     "extra_lives": {
-        "label": "Vidas Extras",
-        "desc": "Aumenta o numero maximo de vidas.",
+        "label": "Segunda Chance",
+        "desc": "Da uma chance de o inimigo que chegaria ao fim voltar "
+                 "para o comeco em vez de tirar uma vida (max. 1x por "
+                 "inimigo). Sem limite de nivel, mas cada nivel novo "
+                 "aumenta a chance cada vez menos -- nunca chega a 100%.",
         "icon_color": (255, 120, 120),
-        "base_cost": 2, "cost_step": 2,
-        "effect_per_level": 2,  # +2 vidas por ponto
-        "max_level": 10,
+        "base_cost": 8, "cost_step": 5,
+        # curva assintotica: chance(n) = SECOND_CHANCE_CAP * (1 - decay^n)
+        # (ver SECOND_CHANCE_CAP / SECOND_CHANCE_DECAY abaixo e o metodo
+        # `second_chance_prob` em systems/meta_upgrades.py)
+        "effect_per_level": None,
+        "max_level": None,  # infinito de proposito
     },
     "upgrade_discount": {
         "label": "Desconto em Melhorias",
         "desc": "Reduz o custo dos upgrades de caminho das torres.",
         "icon_color": (220, 140, 255),
-        "base_cost": 3, "cost_step": 2,
-        "effect_per_level": 0.08,  # -8% de custo por nivel
-        "max_level": 8,
+        "base_cost": 9, "cost_step": 6,
+        "effect_per_level": 0.06,  # -6% de custo por nivel
+        "max_level": 7,
     },
 }
 META_UPGRADE_KEYS = list(META_UPGRADE_DEFS.keys())
+
+# Curva de "Segunda Chance" (ver acima): teto teorico e velocidade de
+# aproximacao. Com cap=0.65 e decay=0.90, a chance sobe rapido no
+# comeco e desacelera bastante depois do nivel ~15, sem nunca chegar
+# no teto (e o teto ja fica bem longe de 100%).
+SECOND_CHANCE_CAP = 0.65
+SECOND_CHANCE_DECAY = 0.90
+
+# ----------------------------------------------------------------------------
+# TIER 6 -- LIBERADO POR GEMAS
+# Alem do custo em ouro (TIER_COSTS[-1] em upgrades.py), tier 6 agora
+# tambem exige gemas -- e por isso que a trava antiga de "so um tier 6
+# por tipo de torre na partida" foi removida (ver Game.tier6_owner):
+# gemas ja sao o limitador natural de quantos tier 6 voce consegue
+# bancar, entao a trava artificial deixou de fazer sentido.
+# ----------------------------------------------------------------------------
+TIER6_GEM_COST = 5

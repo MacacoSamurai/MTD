@@ -14,6 +14,7 @@ from .config import (
     GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_COLS, GRID_ROWS, CELL_SIZE,
     CLICK_DRAG_THRESHOLD, COL_GOLD, COL_GEM, TOP_HUD_HEIGHT,
     TOWER_PANEL_WIDTH, TOWER_PANEL_SLIDE_SPEED, TOWER_PANEL_DOUBLE_CLICK_MS,
+    TIER6_GEM_COST,
 )
 from .paths import MapPath
 from .maps import DEFAULT_MAP_ID
@@ -130,7 +131,7 @@ class Game:
 
     def reset(self):
         self.gold = STARTING_GOLD + self.meta.bonus_starting_gold()
-        self.lives = STARTING_LIVES + self.meta.bonus_lives()
+        self.lives = STARTING_LIVES
         self.enemies = []
         self.projectiles = []
         # `vfx` e `pending_blasts` fazem do Game o "world" que entities/ e
@@ -278,9 +279,11 @@ class Game:
     # ARVORE DE UPGRADES (caminhos / crosspath / tier 6)
     # ------------------------------------------------------------------
     def tier6_owner(self, ttype):
-        """Celula da torre que JA usou o tier 6 daquele tipo nesta
-        partida, ou None. E a regra fundamental do documento: um unico
-        tier 6 por TIPO de torre (os tres caminhos sao alternativos)."""
+        """Celula da PRIMEIRA torre que ja tem tier 6 daquele tipo nesta
+        partida, ou None -- usado so como informacao (ex.: destaque de
+        UI). NAO bloqueia mais compras: o limitador de quantos tier 6 um
+        jogador consegue bancar agora e o custo em gemas (TIER6_GEM_COST),
+        nao uma trava artificial de "1 por tipo"."""
         for cell, t in self.towers.items():
             if t.ttype == ttype and t.has_ability:
                 return cell
@@ -293,6 +296,9 @@ class Game:
         Concentrado aqui de proposito -- desenho (tower_panel) e clique
         (try_click_panel_upgrade) leem da MESMA fonte, entao um botao
         nunca aparece habilitado e recusa a compra (ou vice-versa).
+
+        Retorna (ok, custo_ouro, motivo). O custo em gemas do tier 6 e
+        consultado separadamente via `path_upgrade_gem_cost`.
         """
         tier = tower.tiers[path_index] + 1
         if tier > up.MAX_TIER:
@@ -302,12 +308,22 @@ class Game:
             return False, None, reason
         cost = self.path_upgrade_cost(tower, path_index)
         if tier == up.MAX_TIER:
-            owner = self.tier6_owner(tower.ttype)
-            if owner is not None:
-                return False, cost, "Ja existe um tier 6 deste tipo"
+            gem_cost = self.path_upgrade_gem_cost(tower, path_index)
+            if self.gems < gem_cost:
+                return False, cost, f"Requer {gem_cost} gemas"
         if self.gold < cost:
             return False, cost, "Ouro insuficiente"
         return True, cost, ""
+
+    def path_upgrade_gem_cost(self, tower, path_index):
+        """Custo em GEMAS de comprar o proximo tier de um caminho -- so
+        e diferente de zero quando o proximo tier e o 6 (a "super torre"
+        da partida). E o que agora libera o tier 6, no lugar da antiga
+        trava de "1 por tipo"."""
+        tier = tower.tiers[path_index] + 1
+        if tier == up.MAX_TIER:
+            return TIER6_GEM_COST
+        return 0
 
     def path_upgrade_cost(self, tower, path_index):
         base = tower.next_tier_cost(path_index)
@@ -359,7 +375,9 @@ class Game:
                 ok, cost, reason = self.path_purchase_state(tower, path_index)
                 tx, ty = tower.grid_pos()
                 if ok:
+                    gem_cost = self.path_upgrade_gem_cost(tower, path_index)
                     self.gold -= cost
+                    self.gems -= gem_cost
                     tower.buy_path(path_index)
                     tower.invested += cost
                     name = up.tier_def(tower.ttype, path_index, tower.tiers[path_index])["name"]
@@ -625,6 +643,9 @@ class Game:
                 continue
             e._processed_death = True
             if e.reached_end:
+                if e.try_second_chance(self.meta.second_chance_prob()):
+                    self.add_floating_text(e.x, e.y - 22, "SEGUNDA CHANCE!", COL_GEM)
+                    continue
                 self.lives -= 1
                 if self.lives <= 0:
                     self.lives = 0

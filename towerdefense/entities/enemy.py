@@ -71,6 +71,10 @@ class Enemy:
         self.alive = True
         self.reached_end = False
         self._processed_death = False
+        # "Segunda Chance" (meta-upgrade de gemas, ver systems/meta_upgrades):
+        # cada inimigo so pode ser devolvido ao comeco do caminho UMA vez,
+        # senao um upgrade forte deixaria certos inimigos imortais.
+        self.used_second_chance = False
 
         # --- efeitos de status ---
         self.slow_timer = 0.0
@@ -179,6 +183,24 @@ class Enemy:
             self.alive = False
             return
         self.x, self.y, self.angle = self.map_path.point_at_distance(self.dist)
+
+    def try_second_chance(self, prob):
+        """Chamado pelo Game quando este inimigo chegou ao fim do
+        caminho. Com chance `prob` (e so se ainda nao usou a sua unica
+        chance), devolve o inimigo ao INICIO do caminho em vez de deixar
+        a vida ser perdida. Retorna True se o inimigo foi devolvido
+        (e portanto NAO deve tirar vida nem ser removido)."""
+        if self.used_second_chance or prob <= 0:
+            return False
+        if random.random() >= prob:
+            return False
+        self.used_second_chance = True
+        self.dist = 0.0
+        self.reached_end = False
+        self.alive = True
+        self._processed_death = False
+        self.x, self.y, self.angle = self.map_path.point_at_distance(0)
+        return True
 
     # ------------------------------------------------------------------
     # EFEITOS APLICADOS PELAS TORRES

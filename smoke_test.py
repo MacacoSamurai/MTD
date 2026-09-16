@@ -7,7 +7,9 @@ seria caro validar na mao a cada mudanca de balanceamento:
     - as regras de crosspath (quantos caminhos, onde o secundario trava);
     - a integridade da arvore (5 x 3 x 6 = 90 evolucoes, todas com nome,
       descricao e habilidade tier 6 implementada);
-    - a regra fundamental de UM tier 6 por tipo de torre na partida;
+    - que tier 6 exige gemas (nao ha mais limite de "1 por tipo" --
+      varias torres do mesmo tipo podem chegar a tier 6, desde que o
+      jogador pague o custo em gemas de cada uma);
     - que o merge nao consegue driblar o crosspath;
     - 90 segundos de partida de verdade (update + draw), conferindo que
       as cinco habilidades chegam a disparar sozinhas e que inimigos
@@ -77,6 +79,7 @@ print("== simulacao de partida ==")
 g = Game()
 g.start_map(g.selected_map_id)
 g.gold = 10 ** 9
+g.gems = 10 ** 6  # tier 6 agora tambem cobra gemas (ver TIER6_GEM_COST)
 
 free = [c for c in ((x, y) for y in range(9) for x in range(15))
         if c not in g.map_path.cell_set]
@@ -106,7 +109,8 @@ for i, (ttype, path) in enumerate(plan):
     check(t.has_ability, f"{ttype} tier 6 sem habilidade")
     placed.append((cell, t))
 
-# regra fundamental: um unico tier 6 por tipo
+# nova regra: NAO ha mais limite de "1 tier 6 por tipo" -- o limitador
+# agora e ter gemas suficientes (TIER6_GEM_COST por compra de tier 6)
 cell2 = free[60]
 g.towers[cell2] = Tower(cell2[0], cell2[1], ttype="canhao")
 t2 = g.towers[cell2]
@@ -116,7 +120,28 @@ for _ in range(5):
         g.gold -= cost
         t2.buy_path(0)
 ok, cost, reason = g.path_purchase_state(t2, 0)
-check(not ok and "tier 6" in reason, f"2o tier 6 de canhao deveria ser bloqueado ({reason})")
+check(ok, f"2o tier 6 de canhao deveria ser permitido, tendo gemas ({reason})")
+if ok:
+    g.gold -= cost
+    g.gems -= g.path_upgrade_gem_cost(t2, 0)
+    t2.buy_path(0)
+check(t2.tiers[0] == 6, f"canhao (2a torre) deveria estar no tier 6 ({t2.tiers})")
+check(t2.has_ability, "canhao (2a torre) tier 6 sem habilidade")
+# sem gemas, a compra do tier 6 deve ser recusada mesmo com ouro sobrando
+cell3 = free[61]
+g.towers[cell3] = Tower(cell3[0], cell3[1], ttype="canhao")
+t3 = g.towers[cell3]
+for _ in range(5):
+    ok, cost, _r = g.path_purchase_state(t3, 0)
+    if ok:
+        g.gold -= cost
+        t3.buy_path(0)
+check(t3.tiers[0] == 5, f"canhao (3a torre) deveria estar em tier 5 antes do teste ({t3.tiers})")
+saved_gems = g.gems
+g.gems = 0
+ok, cost, reason = g.path_purchase_state(t3, 0)
+check(not ok and "gemas" in reason, f"tier 6 sem gemas deveria ser recusado ({reason})")
+g.gems = saved_gems
 # o caminho secundario ainda pode ir ate o tier 2 (5-2-0 e legal)...
 for _ in range(2):
     ok2, cost2, reason2 = g.path_purchase_state(t2, 1)
