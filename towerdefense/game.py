@@ -9,7 +9,7 @@ import pygame
 
 from .config import (
     WIDTH, HEIGHT, FPS, COL_BG, COL_MERGE_GLOW, COL_SWAP_GLOW,
-    STARTING_GOLD, STARTING_LIVES, TOWER_BASE_COST,
+    STARTING_GOLD, STARTING_LIVES, TOWER_BASE_COST, TOWER_SELL_REFUND_RATIO,
     SKIP_WAVE_BASE_BONUS, SKIP_WAVE_BONUS_PER_WAVE,
     GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_COLS, GRID_ROWS, CELL_SIZE,
     CLICK_DRAG_THRESHOLD, COL_GOLD, COL_GEM, TOP_HUD_HEIGHT,
@@ -140,9 +140,27 @@ class Game:
             return False
         self.gold -= self.tower_cost
         start_level = 1 + int(self.meta.start_tower_level_bonus())
-        t = Tower(cell[0], cell[1], ttype=ttype, level=start_level)
+        t = Tower(cell[0], cell[1], ttype=ttype, level=start_level, invested=self.tower_cost)
         self.towers[cell] = t
         self.add_floating_text(*t.grid_pos(), f"-{self.tower_cost}g", COL_GOLD)
+        return True
+
+    # ------------------------------------------------------------------
+    def sell_tower(self, cell):
+        """Vende a torre da celula dada, devolvendo uma fracao
+        (TOWER_SELL_REFUND_RATIO) do ouro investido nela (compra +
+        upgrades de caminho + o que veio de merges). Retorna True se
+        vendeu."""
+        tower = self.towers.get(cell)
+        if tower is None:
+            return False
+        refund = int(round(tower.invested * TOWER_SELL_REFUND_RATIO))
+        self.gold += refund
+        tx, ty = tower.grid_pos()
+        del self.towers[cell]
+        if self.selected_tower_cell == cell:
+            self.selected_tower_cell = None
+        self.add_floating_text(tx, ty, f"+{refund}g", COL_GOLD)
         return True
 
     # ------------------------------------------------------------------
@@ -258,9 +276,12 @@ class Game:
         tower = self.selected_tower()
         if tower is None:
             return False
-        rects, back_rect = tower_panel.upgrade_button_rects(self.tower_panel_x)
+        rects, back_rect, sell_rect = tower_panel.upgrade_button_rects(self.tower_panel_x)
         if back_rect.collidepoint(pos):
             self.selected_tower_cell = None
+            return True
+        if sell_rect.collidepoint(pos):
+            self.sell_tower(self.selected_tower_cell)
             return True
         for rect, path_index in rects:
             if rect.collidepoint(pos):
@@ -269,6 +290,7 @@ class Game:
                 if ok:
                     self.gold -= cost
                     tower.buy_path(path_index)
+                    tower.invested += cost
                     name = up.tier_def(tower.ttype, path_index, tower.tiers[path_index])["name"]
                     self.add_floating_text(tx, ty - 24, name, COL_MERGE_GLOW)
                 elif reason:
@@ -414,6 +436,10 @@ class Game:
                     new_level = target_tower.level + 1
                     target_tower.level = new_level
                     target_tower.tiers = merged_tiers
+                    # o ouro investido nas duas torres se soma na
+                    # resultante -- senao vender depois de fundir
+                    # devolveria so metade do que foi de fato gasto
+                    target_tower.invested += tower.invested
                     target_tower.recalc_stats()
                     del self.towers[origin]
                     if self.selected_tower_cell == origin:

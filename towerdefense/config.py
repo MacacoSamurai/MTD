@@ -52,6 +52,11 @@ STARTING_LIVES = 20
 TOWER_BASE_COST = 60
 SKIP_WAVE_BASE_BONUS = 40   # ouro extra ganho ao pular a onda
 SKIP_WAVE_BONUS_PER_WAVE = 6  # cresce um pouco a cada onda
+# fracao do ouro INVESTIDO (compra + upgrades de caminho, incluindo o que
+# foi fundido) devolvida ao vender uma torre -- ver Tower.invested e
+# Game.sell_tower. Menor que 1 de proposito, senao comprar/vender vira
+# uma forma gratis de "reordenar" torres na grade sem custo nenhum.
+TOWER_SELL_REFUND_RATIO = 0.7
 
 # As melhorias por torre NAO sao mais tres barrinhas genericas de
 # dano/alcance/cadencia: viraram a arvore de 3 caminhos x 6 tiers
