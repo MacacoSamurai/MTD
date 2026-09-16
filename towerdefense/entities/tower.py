@@ -1,4 +1,4 @@
-"""Torres: helpers de nivel (cor/nome), a classe Tower e seu merge/upgrade."""
+﻿"""Torres: helpers de nivel (cor/nome), a classe Tower e seu merge/upgrade."""
 
 import math
 import random
@@ -34,29 +34,6 @@ def tower_name(level):
     return f"Ascendido +{level - len(TOWER_LEVEL_NAMES)}"
 
 
-<<<<<<< HEAD
-def path_tinted_color(level, ttype, tiers):
-    """Cor da torre considerando a ESPECIALIZACAO, nao so o nivel de merge.
-
-    Uma torre sem upgrades continua com a cor do nivel (como antes). A
-    partir do tier 1 a cor vai sendo puxada para a cor do caminho
-    principal, ficando praticamente pura no tier 6 -- assim da pra bater
-    o olho no mapa e saber em que caminho cada torre foi especializada,
-    que e a informacao que mais importa depois que a arvore existe.
-    """
-    base = tower_color(level)
-    if tiers is None:
-        return base
-    mp = up.main_path(tiers)
-    if mp is None:
-        return base
-    target = up.PATH_COLORS[ttype][mp]
-    t = min(1.0, 0.16 + 0.15 * tiers[mp])
-    return tuple(int(base[i] + (target[i] - base[i]) * t) for i in range(3))
-
-
-=======
->>>>>>> 4f6bded (Remove tingimento de cor por caminho das torres)
 def spec_name(ttype, tiers):
     """Nome de exibicao da especializacao: nome do tier mais alto comprado
     (ex.: "Canhao Demolidor"), ou None se a torre ainda e basica."""
@@ -276,14 +253,10 @@ def draw_tower_shape(surf, cx, cy, ttype, level=1, angle=None, radius=None,
     (util pra icones pequenos de UI); se omitido, usa o mesmo calculo de
     tamanho por nivel/tipo do jogo de verdade."""
     cx, cy = int(cx), int(cy)
-<<<<<<< HEAD
-    color = path_tinted_color(level, ttype, tiers)
-=======
     # cor SEMPRE pela tabela de nivel (merge) -- a arvore de upgrades nao
     # tinge a torre, so muda a silhueta (tamanho, halo do tier 6 e os
     # marcadores de caminho desenhados mais abaixo).
     color = tower_color(level)
->>>>>>> 4f6bded (Remove tingimento de cor por caminho das torres)
     if radius is None:
         radius = (19 + min(level, 10) * 1.1) * _SIZE_SCALE.get(ttype, _DEFAULT_SIZE_SCALE)
     # torres especializadas ficam um pouco maiores conforme sobem de tier
@@ -521,11 +494,7 @@ class Tower:
         return spec_name(self.ttype, self.tiers) or TOWER_TYPES[self.ttype]["label"]
 
     def color(self):
-<<<<<<< HEAD
-        return path_tinted_color(self.level, self.ttype, self.tiers)
-=======
         return tower_color(self.level)
->>>>>>> 4f6bded (Remove tingimento de cor por caminho das torres)
 
     def grid_pos(self):
         gx = GRID_ORIGIN_X + self.col * CELL_SIZE + CELL_SIZE // 2
