@@ -12,7 +12,7 @@ from .config import (
     STARTING_GOLD, STARTING_LIVES, TOWER_BASE_COST, TOWER_SELL_REFUND_RATIO,
     SKIP_WAVE_BASE_BONUS, SKIP_WAVE_BONUS_PER_WAVE,
     GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_COLS, GRID_ROWS, CELL_SIZE,
-    CLICK_DRAG_THRESHOLD, COL_GOLD, COL_GEM, TOP_HUD_HEIGHT,
+    CLICK_DRAG_THRESHOLD, COL_GOLD, COL_GEM, COL_RED, TOP_HUD_HEIGHT,
     TOWER_PANEL_WIDTH, TOWER_PANEL_SLIDE_SPEED, TOWER_PANEL_DOUBLE_CLICK_MS,
     TIER6_GEM_COST,
 )
@@ -166,6 +166,12 @@ class Game:
         self.tower_panel_x = WIDTH - TOWER_PANEL_WIDTH
         self.selected_tower_cell = None  # celula com upgrade aberto no painel
         self.dragging_from_panel = None  # type_key sendo arrastado do painel, ou None
+        # type_key em "modo de colocacao": clicou uma vez no card (sem
+        # arrastar) e continua selecionado ate o jogador clicar de novo no
+        # mesmo card, escolher outro, apertar ESC ou abrir o modo upgrade --
+        # NAO desmarca sozinho depois de uma compra, pra dar pra clicar em
+        # varias celulas seguidas sem reabrir o painel a cada torre.
+        self.selected_shop_type = None
         self.panel_click_pending = None  # (type_key, tempo_ms) do ultimo clique no card, p/ duplo-clique
 
         self.recalc_tower_cost()
@@ -393,22 +399,39 @@ class Game:
 
     def try_click_panel_shop(self, pos):
         """Processa um clique quando o painel esta em modo loja.
-        Comeca um drag potencial no card clicado, ou (se for o segundo
-        clique rapido no mesmo card) compra direto na 1a celula vazia.
-        Retorna True se o clique foi consumido (dentro do painel)."""
+
+        Alem do modo de colocacao persistente (ver `selected_shop_type`),
+        um SEGUNDO clique rapido no MESMO card (dentro de
+        TOWER_PANEL_DOUBLE_CLICK_MS) e tratado aqui, no MOUSEDOWN, como
+        atalho de "compra instantanea": poe uma torre direto na primeira
+        celula vazia e desliga o modo de colocacao, sem esperar o
+        jogador escolher a celula -- util pra comprar rapido sem mirar.
+        Fora isso, so COMECA um drag potencial (dragging_from_panel +
+        guarda mouse_down_pos); a decisao entre "foi um clique" (liga/
+        desliga `selected_shop_type`) ou "foi um arrasto de verdade"
+        (solta uma unica torre onde o mouse estiver) e feita no MOUSEUP,
+        em `handle_click_up`, comparando a distancia percorrida (mesmo
+        padrao usado pra distinguir clique de arrasto numa torre ja
+        colocada, ver CLICK_DRAG_THRESHOLD). Retorna True se o clique
+        foi consumido (dentro do painel)."""
         for rect, ttype in tower_panel.shop_card_rects(self.tower_panel_x):
             if rect.collidepoint(pos):
                 now = pygame.time.get_ticks()
                 pending = self.panel_click_pending
                 if pending is not None and pending[0] == ttype and \
                         now - pending[1] <= TOWER_PANEL_DOUBLE_CLICK_MS:
-                    # 2o clique rapido no mesmo card: compra automatica
+                    # 2o clique rapido no mesmo card: compra instantanea,
+                    # cancela o "drag potencial" que o 1o clique comecou
+                    # e sai do modo de colocacao (o 1o clique ja tinha
+                    # ligado `selected_shop_type` no mouseup dele).
                     self.panel_click_pending = None
+                    self.dragging_from_panel = None
+                    self.mouse_down_pos = None
+                    self.selected_shop_type = None
                     cell = self.first_empty_cell()
                     if cell is not None:
                         self.buy_tower_at(cell, ttype)
                 else:
-                    # 1o clique: registra e tambem inicia um drag potencial
                     self.panel_click_pending = (ttype, now)
                     self.dragging_from_panel = ttype
                     self.mouse_down_pos = pos
@@ -444,6 +467,24 @@ class Game:
         cell = self.cell_from_pixel(*pos)
         if cell is None:
             return
+
+        # modo de colocacao ativo (card clicado no painel, ver
+        # `selected_shop_type`): clicar numa celula valida da grade compra
+        # ali direto, na hora, SEM desmarcar o tipo selecionado -- assim
+        # da pra clicar em varias celulas em sequencia. So sai do modo de
+        # colocacao clicando o mesmo card de novo, escolhendo outro tipo,
+        # apertando ESC, ou selecionando uma torre ja colocada (upgrade).
+        if self.selected_shop_type is not None:
+            if cell in self.towers or cell in self.map_path.cell_set:
+                return  # celula ocupada/e caminho: ignora, mantem selecionado
+            if self.gold < self.tower_cost:
+                cx, cy = (GRID_ORIGIN_X + cell[0] * CELL_SIZE + CELL_SIZE // 2,
+                          GRID_ORIGIN_Y + cell[1] * CELL_SIZE + CELL_SIZE // 2)
+                self.add_floating_text(cx, cy, "Sem ouro!", COL_RED)
+                return
+            self.buy_tower_at(cell, self.selected_shop_type)
+            return
+
         if cell in self.towers:
             # comeca um "drag potencial": so vira arrasto de verdade se o
             # mouse se mover o suficiente antes de soltar (ver handle_click_up)
@@ -467,13 +508,30 @@ class Game:
         return area.collidepoint(pos)
 
     def handle_click_up(self, pos):
-        # soltar uma torre que estava sendo arrastada do painel (compra)
+        # soltar uma torre que estava sendo arrastada do painel (compra).
+        # Aqui e onde se decide se aquele mousedown no card foi um CLIQUE
+        # (liga/troca/desliga `selected_shop_type`, o modo de colocacao
+        # persistente) ou um ARRASTO de verdade (solta uma unica torre na
+        # celula onde o mouse estiver e NAO altera a selecao persistente
+        # -- e uma acao pontual, independente dela).
         if self.dragging_from_panel is not None:
             ttype = self.dragging_from_panel
             self.dragging_from_panel = None
-            if not self._pos_over_panel(pos):
-                cell = self.cell_from_pixel(*pos)
-                self.buy_tower_at(cell, ttype)
+            moved = False
+            if self.mouse_down_pos is not None:
+                dx = pos[0] - self.mouse_down_pos[0]
+                dy = pos[1] - self.mouse_down_pos[1]
+                moved = dx * dx + dy * dy > CLICK_DRAG_THRESHOLD ** 2
+            self.mouse_down_pos = None
+            if moved:
+                if not self._pos_over_panel(pos):
+                    cell = self.cell_from_pixel(*pos)
+                    self.buy_tower_at(cell, ttype)
+            else:
+                if self.selected_shop_type == ttype:
+                    self.selected_shop_type = None  # clicou o mesmo card: desliga
+                else:
+                    self.selected_shop_type = ttype  # clicou um card novo: troca/liga
             return
 
         if self.dragging_tower is None:
@@ -495,6 +553,7 @@ class Game:
                 self.drag_origin = None
                 self.mouse_down_pos = None
                 self.selected_tower_cell = origin
+                self.selected_shop_type = None  # sai do modo de colocacao ao abrir upgrade
                 self.tower_panel_open = True
                 return
         self.mouse_down_pos = None
@@ -745,7 +804,9 @@ class Game:
             self.dragging_tower.draw(self.canvas, self.mouse_pos, True)
 
         # preview da celula alvo enquanto arrasta uma torre nova do painel
-        if self.dragging_from_panel is not None:
+        # OU com um tipo selecionado no modo de colocacao (`selected_shop_type`)
+        preview_ttype = self.dragging_from_panel or self.selected_shop_type
+        if preview_ttype is not None:
             cell = self.hovered_cell
             if cell is not None:
                 x = GRID_ORIGIN_X + cell[0] * CELL_SIZE
@@ -756,7 +817,7 @@ class Game:
                 pygame.draw.rect(self.canvas, col, rect.inflate(-4, -4), 3, border_radius=8)
 
         tower_panel.draw_tower_panel(self, self.canvas)
-        if self.dragging_from_panel is not None:
+        if preview_ttype is not None and not self._pos_over_panel(self.mouse_pos):
             tower_panel.draw_dragged_card_ghost(self, self.canvas)
 
         # floating texts
@@ -815,6 +876,8 @@ class Game:
                         self.show_help = False  # ESC fecha o "Como Jogar" antes de sair
                     elif event.key == pygame.K_ESCAPE and self.state == "map_select":
                         self.state = "main_menu"  # ESC volta ao menu principal
+                    elif event.key == pygame.K_ESCAPE and self.selected_shop_type is not None:
+                        self.selected_shop_type = None  # cancela o modo de colocacao antes de sair
                     elif event.key == pygame.K_ESCAPE:
                         running = False
                     elif self.state == "main_menu":
@@ -833,6 +896,7 @@ class Game:
                         self.meta_shop_open = not self.meta_shop_open
                         # fecha outros menus pra nao sobrepor
                         self.selected_tower_cell = None
+                        self.selected_shop_type = None
                     elif event.key == pygame.K_t:
                         self.toggle_tower_panel()
                     elif event.key == pygame.K_r and self.game_over:
@@ -842,6 +906,7 @@ class Game:
                         self.state = "map_select"
                         self.meta_shop_open = False
                         self.selected_tower_cell = None
+                        self.selected_shop_type = None
                         self.dragging_from_panel = None
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:
@@ -876,6 +941,7 @@ class Game:
                         elif self.gem_button_rect is not None and self.gem_button_rect.collidepoint(pos):
                             self.meta_shop_open = True
                             self.selected_tower_cell = None
+                            self.selected_shop_type = None
                         elif self.skip_button_rect is not None and self.skip_button_rect.collidepoint(pos):
                             self.skip_current_wave()
                         else:

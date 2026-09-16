@@ -4,10 +4,19 @@ Fica sobreposto na frente do grid, do lado direito da tela, e pode
 abrir/fechar deslizando (sem redimensionar o grid). Tem dois "modos"
 de conteudo:
 
-- Modo LOJA (game.selected_tower() is None): mostra um card
-  por tipo de torre, arrastavel ate a grade para comprar. Dois
-  cliques rapidos no mesmo card tambem compram, colocando a torre
-  automaticamente na primeira celula vazia disponivel.
+- Modo LOJA (game.selected_tower() is None): mostra um card por tipo
+  de torre. Um clique simples no card liga o "modo de colocacao"
+  (`game.selected_shop_type`, destacado com borda/preenchimento
+  diferentes): a partir dai, cada clique numa celula vazia da grade
+  compra ali na hora, e a selecao PERSISTE -- da pra clicar em varias
+  celulas em sequencia sem reabrir nada. Clicar o mesmo card de novo
+  desliga; clicar outro card troca o tipo selecionado. Um SEGUNDO
+  clique rapido no MESMO card (duplo-clique, `panel_click_pending` em
+  game.py) compra instantaneamente na primeira celula vazia e desliga
+  o modo de colocacao -- atalho pra quem quer uma torre ja, sem mirar.
+  Arrastar o card (em vez de so clicar) continua funcionando como
+  antes: solta UMA torre onde soltar o mouse, sem alterar a selecao
+  persistente.
 - Modo UPGRADE (game.selected_tower() retorna uma torre): mostra os
   botoes de melhoria (dano/alcance/cadencia) daquela torre, no lugar
   da lista de compra.
@@ -24,8 +33,8 @@ from ..config import (
     WIDTH, HEIGHT, TOP_HUD_HEIGHT, BOTTOM_HUD_HEIGHT,
     TOWER_PANEL_WIDTH, TOWER_PANEL_CARD_H, TOWER_PANEL_CARD_GAP,
     TOWER_TYPES, TOWER_TYPE_KEYS,
-    COL_WHITE, COL_RED, COL_GOLD, COL_GEM, COL_GREEN, COL_TEXT_DIM, COL_PANEL,
-    COL_GRID_BORDER, TOWER_SELL_REFUND_RATIO,
+    COL_WHITE, COL_RED, COL_GOLD, COL_GREEN, COL_TEXT_DIM, COL_PANEL,
+    COL_GRID_BORDER, COL_MERGE_GLOW, TOWER_SELL_REFUND_RATIO,
 )
 from ..fonts import get_font
 from ..entities.tower import tower_color, tower_name, draw_tower_shape
@@ -181,12 +190,21 @@ def _draw_shop_mode(game, surf, panel_x):
         color = spec["base_color"]
         affordable = game.gold >= game.tower_cost
         hovered = rect.collidepoint(game.mouse_pos)
+        selected = game.selected_shop_type == ttype
 
         base_fill = theme.shade(color, -0.82) if affordable else (28, 28, 32)
-        if hovered and affordable:
+        if selected:
+            base_fill = theme.shade(color, -0.62)  # card selecionado: bem mais claro, salta aos olhos
+        elif hovered and affordable:
             base_fill = theme.shade(color, -0.72)
-        theme.draw_panel(surf, rect, base_fill, border=color if affordable else (70, 70, 76),
-                          radius=8, border_w=2 if not hovered else 3, shadow=False)
+        border = COL_MERGE_GLOW if selected else (color if affordable else (70, 70, 76))
+        border_w = 3 if (selected or hovered) else 2
+        theme.draw_panel(surf, rect, base_fill, border=border,
+                          radius=8, border_w=border_w, shadow=False)
+        if selected:
+            # contorno extra por fora do card, pra ficar obvio de longe
+            # qual tipo esta em modo de colocacao (nao so o card em si)
+            pygame.draw.rect(surf, COL_MERGE_GLOW, rect.inflate(6, 6), 2, border_radius=10)
 
         # torre de verdade em miniatura (nao um icone generico da forma):
         # usa o mesmo desenho de Tower.draw, entao qualquer mudanca futura
@@ -222,8 +240,13 @@ def _draw_shop_mode(game, surf, panel_x):
             dtxt = font_desc.render(line, True, COL_TEXT_DIM)
             surf.blit(dtxt, (rect.x + 10, rect.y + 46 + i * 15))
 
-        hint = "arraste ou clique 2x" if affordable else "sem ouro"
-        htxt = font_desc.render(hint, True, COL_TEXT_DIM)
+        if selected:
+            hint, hint_col = "SELECIONADO - clique na grade", COL_MERGE_GLOW
+        elif affordable:
+            hint, hint_col = "clique = selecionar, 2x = compra ja", COL_TEXT_DIM
+        else:
+            hint, hint_col = "sem ouro", COL_TEXT_DIM
+        htxt = font_desc.render(hint, True, hint_col)
         surf.blit(htxt, (rect.x + 10, rect.bottom - 18))
 
 
@@ -378,12 +401,15 @@ def _draw_upgrade_mode(game, surf, panel_x):
 
 
 def draw_dragged_card_ghost(game, surf):
-    """Enquanto uma torre esta sendo arrastada do painel, desenha a torre
-    de verdade (nao um icone generico da forma) seguindo o mouse -- o
+    """Enquanto uma torre esta sendo arrastada OU com um tipo selecionado
+    no modo de colocacao (`selected_shop_type`), desenha a torre de
+    verdade (nao um icone generico da forma) seguindo o mouse -- o
     alcance/preview real da torre ja e desenhado por
     menus.draw_tower_range_hover-like logic em game.py, aqui e so o
-    corpo da torre, no mesmo nivel com que ela vai nascer ao ser solta."""
-    ttype = game.dragging_from_panel
+    corpo da torre, no mesmo nivel com que ela vai nascer ao ser
+    colocada. O arrasto tem prioridade (e o mais especifico dos dois:
+    nao da pra estar arrastando um tipo diferente do selecionado)."""
+    ttype = game.dragging_from_panel or game.selected_shop_type
     if ttype is None:
         return
     start_level = 1 + int(game.meta.start_tower_level_bonus())
