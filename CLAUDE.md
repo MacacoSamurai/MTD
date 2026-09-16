@@ -145,6 +145,17 @@ Se for adicionar um menu/tela nova, siga esse padrao (veja
   habilidade divergiriam na primeira mudanca de balanceamento. A ordem
   das contas (esquiva -> critico -> bonus situacionais -> quebra de
   armadura -> dano -> status) e parte do balanceamento.
+- **O modo do painel lateral tem UMA fonte de verdade: `Game.selected_tower()`**.
+  Desenho (`ui/tower_panel.draw_tower_panel`) e clique
+  (`Game.handle_click_down`) chamam essa funcao; nunca leia
+  `selected_tower_cell` cru pra decidir loja x upgrade. Ja houve um bug
+  em que o desenho testava `cell in towers` e o clique testava so
+  `cell is not None`: depois de mover/fundir a torre selecionada, a
+  celula ficava vazia, o painel mostrava a LOJA mas o clique ia parar no
+  tratamento de UPGRADE e era engolido -- os cards de compra apareciam e
+  nao faziam nada (sem torre e sem desconto de ouro). `selected_tower()`
+  limpa a selecao obsoleta, e `handle_click_up` faz a selecao ACOMPANHAR
+  a torre quando ela troca de celula (mover, merge, troca).
 - **Regras de tier 6 moram em dois lugares, de proposito**: o crosspath
   (regra local da torre) em `upgrades.can_upgrade`; o limite de UM tier 6
   por TIPO de torre (regra da partida inteira) em `Game.tier6_owner` /

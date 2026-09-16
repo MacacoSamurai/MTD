@@ -4,11 +4,11 @@ Fica sobreposto na frente do grid, do lado direito da tela, e pode
 abrir/fechar deslizando (sem redimensionar o grid). Tem dois "modos"
 de conteudo:
 
-- Modo LOJA (game.selected_tower_for_upgrade is None): mostra um card
+- Modo LOJA (game.selected_tower() is None): mostra um card
   por tipo de torre, arrastavel ate a grade para comprar. Dois
   cliques rapidos no mesmo card tambem compram, colocando a torre
   automaticamente na primeira celula vazia disponivel.
-- Modo UPGRADE (ha uma torre selecionada no grid): mostra os
+- Modo UPGRADE (game.selected_tower() retorna uma torre): mostra os
   botoes de melhoria (dano/alcance/cadencia) daquela torre, no lugar
   da lista de compra.
 
@@ -123,7 +123,11 @@ def draw_tower_panel(game, surf):
         surf.blit(bg, area.topleft)
         pygame.draw.rect(surf, COL_GRID_BORDER, area, 2, border_radius=10)
 
-        if game.selected_tower_cell is not None and game.selected_tower_cell in game.towers:
+        # game.selected_tower() (e nao selected_tower_cell cru) e o que
+        # decide o modo -- o tratamento de clique em game.py chama a MESMA
+        # funcao, entao desenho e clique nunca discordam sobre qual modo o
+        # painel esta mostrando.
+        if game.selected_tower() is not None:
             _draw_upgrade_mode(game, surf, panel_x)
         else:
             _draw_shop_mode(game, surf, panel_x)
@@ -243,8 +247,9 @@ def _draw_tier_pips(surf, x, y, tier, color, size=9, gap=3):
 
 
 def _draw_upgrade_mode(game, surf, panel_x):
-    cell = game.selected_tower_cell
-    tower = game.towers[cell]
+    tower = game.selected_tower()
+    if tower is None:
+        return
     rects, back_rect = upgrade_button_rects(panel_x)
     area = panel_area_rect()
     area.x = panel_x
