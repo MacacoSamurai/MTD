@@ -166,7 +166,7 @@ def draw_meta_shop(game, surf):
     for rect, key in rects:
         spec = META_UPGRADE_DEFS[key]
         lvl = game.meta.level(key)
-        max_lvl = spec["max_level"]
+        max_lvl = spec["max_level"]  # None == sem teto (upgrade infinito)
         cost = game.meta.cost_for_next(key)
         maxed = cost is None
         affordable = (not maxed) and game.gems >= cost
@@ -184,7 +184,8 @@ def draw_meta_shop(game, surf):
         lbl = font_lbl.render(spec["label"], True, COL_WHITE)
         surf.blit(lbl, (rect.x + 36, rect.y + 10))
 
-        lvl_txt = font_val.render(f"Nv {lvl}/{max_lvl}", True, COL_TEXT_DIM)
+        lvl_label = f"Nv {lvl}/{max_lvl}" if max_lvl is not None else f"Nv {lvl}"
+        lvl_txt = font_val.render(lvl_label, True, COL_TEXT_DIM)
         lrect = lvl_txt.get_rect()
         lrect.topright = (rect.right - 12, rect.y + 12)
         surf.blit(lvl_txt, lrect)
@@ -192,16 +193,26 @@ def draw_meta_shop(game, surf):
         desc_txt = font_desc.render(spec["desc"], True, COL_TEXT_DIM)
         surf.blit(desc_txt, (rect.x + 14, rect.y + 40))
 
-        # barra de progresso do nivel
+        # barra de progresso do nivel (upgrades sem teto mostram a chance
+        # atual em vez de "nivel/maximo", que nao existe pra eles)
         bar_x, bar_y = rect.x + 14, rect.y + 62
         bar_w, bar_h = rect.w - 28, 8
         pygame.draw.rect(surf, (15, 18, 24), (bar_x, bar_y, bar_w, bar_h), border_radius=4)
-        pct = lvl / max_lvl if max_lvl else 0
+        if key == "extra_lives":
+            pct = game.meta.second_chance_prob() / 1.0  # ja e 0..1
+        else:
+            pct = lvl / max_lvl if max_lvl else 0
         if pct > 0:
             fill_w = max(bar_h, bar_w * pct) if pct > 0 else 0
             pygame.draw.rect(surf, COL_GEM, (bar_x, bar_y, fill_w, bar_h), border_radius=4)
 
         # custo / status
+        if key == "extra_lives":
+            pct_txt = font_val.render(f"Chance atual: {game.meta.second_chance_prob() * 100:0.1f}%",
+                                       True, COL_GEM)
+            prect = pct_txt.get_rect()
+            prect.topleft = (bar_x, bar_y + bar_h + 3)
+            surf.blit(pct_txt, prect)
         if maxed:
             cost_txt = font_val.render("NIVEL MAXIMO", True, (255, 220, 90))
         else:

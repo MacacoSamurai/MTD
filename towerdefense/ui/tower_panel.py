@@ -387,13 +387,16 @@ def _draw_upgrade_mode(game, surf, panel_x):
             surf.blit(font_desc.render(line, True, COL_TEXT_DIM),
                       (rect.x + 10, rect.y + 64 + i * 14))
 
-        # linha 3: custo (ou o motivo do bloqueio)
+        # linha 3: custo (ou o motivo do bloqueio). Tier 6 tambem cobra
+        # gemas -- mostra os dois precos juntos quando for o caso.
+        gem_cost = game.path_upgrade_gem_cost(tower, path_index)
+        gem_part = f" + {gem_cost} gemas" if gem_cost else ""
         if cost is None:
             info, icol = reason, COL_TEXT_DIM
         elif ok:
-            info, icol = f"{cost}g", COL_GOLD
+            info, icol = f"{cost}g{gem_part}", COL_GOLD if not gem_part else COL_GEM
         else:
-            info, icol = f"{cost}g - {reason}", COL_TEXT_DIM
+            info, icol = f"{cost}g{gem_part} - {reason}", COL_TEXT_DIM
         surf.blit(font_cost.render(info, True, icol), (rect.x + 10, rect.bottom - 20))
 
 

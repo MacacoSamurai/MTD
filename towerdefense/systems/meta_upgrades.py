@@ -1,7 +1,10 @@
 """Loja de gemas: melhorias permanentes dentro da sessao atual, compradas
 com o recurso mais raro do jogo (gemas, obtidas matando bosses)."""
 
-from ..config import META_UPGRADE_DEFS, META_UPGRADE_KEYS
+from ..config import (
+    META_UPGRADE_DEFS, META_UPGRADE_KEYS,
+    SECOND_CHANCE_CAP, SECOND_CHANCE_DECAY,
+)
 
 
 class MetaUpgrades:
@@ -17,13 +20,15 @@ class MetaUpgrades:
     def cost_for_next(self, key):
         spec = META_UPGRADE_DEFS[key]
         lvl = self.levels[key]
-        if lvl >= spec["max_level"]:
-            return None  # ja no maximo
+        max_lvl = spec["max_level"]
+        if max_lvl is not None and lvl >= max_lvl:
+            return None  # ja no maximo (upgrades sem teto nunca caem aqui)
         return spec["base_cost"] + lvl * spec["cost_step"]
 
     def buy(self, key):
         spec = META_UPGRADE_DEFS[key]
-        if self.levels[key] >= spec["max_level"]:
+        max_lvl = spec["max_level"]
+        if max_lvl is not None and self.levels[key] >= max_lvl:
             return False
         self.levels[key] += 1
         return True
@@ -42,8 +47,18 @@ class MetaUpgrades:
     def bonus_starting_gold(self):
         return self.levels["starting_gold"] * META_UPGRADE_DEFS["starting_gold"]["effect_per_level"]
 
-    def bonus_lives(self):
-        return int(self.levels["extra_lives"] * META_UPGRADE_DEFS["extra_lives"]["effect_per_level"])
+    def second_chance_prob(self):
+        """Chance (0..1) de um inimigo que chegaria ao fim voltar pro
+        comeco em vez de tirar uma vida. Curva assintotica: cada nivel
+        novo soma cada vez menos, e o valor nunca alcanca SECOND_CHANCE_CAP
+        (que ja fica longe de 100%) -- e assim que o upgrade continua
+        valendo a pena comprar pra sempre (nivel sem teto) sem trivializar
+        o jogo.
+        """
+        lvl = self.levels["extra_lives"]
+        if lvl <= 0:
+            return 0.0
+        return SECOND_CHANCE_CAP * (1.0 - SECOND_CHANCE_DECAY ** lvl)
 
     def upgrade_cost_mult(self):
         disc = self.levels["upgrade_discount"] * META_UPGRADE_DEFS["upgrade_discount"]["effect_per_level"]

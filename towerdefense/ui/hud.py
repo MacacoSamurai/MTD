@@ -30,14 +30,48 @@ from . import theme
 
 
 def draw_gem_icon(surf, cx, cy, size):
-    """Desenha um pequeno icone de gema (losango facetado)."""
-    pts = [
-        (cx, cy - size), (cx + size * 0.8, cy - size * 0.2),
-        (cx + size * 0.55, cy + size), (cx - size * 0.55, cy + size),
-        (cx - size * 0.8, cy - size * 0.2),
+    """Desenha um icone de gema (corte "esmeralda" facetado, como um
+    diamante de verdade): mesa plana no topo, cintura larga e uma
+    quilha estreita embaixo, com linhas internas de faceta e um
+    brilhinho -- em vez do losango liso de antes."""
+    s = size
+    top_y = cy - s
+    girdle_y = cy - s * 0.15
+    bottom_y = cy + s
+
+    # mesa (facetinha plana no topo) + ombros ate a cintura
+    table = [
+        (cx - s * 0.42, top_y), (cx + s * 0.42, top_y),
+        (cx + s * 1.05, girdle_y), (cx - s * 1.05, girdle_y),
     ]
-    pygame.draw.polygon(surf, COL_GEM, pts)
-    pygame.draw.polygon(surf, (20, 30, 40), pts, 1)
+    # corpo inferior (pavilhao) terminando numa quilha em ponta
+    pavilion = [
+        (cx - s * 1.05, girdle_y), (cx + s * 1.05, girdle_y),
+        (cx, bottom_y),
+    ]
+
+    fill_light = theme.shade(COL_GEM, 0.35)
+    fill_dark = theme.shade(COL_GEM, -0.25)
+
+    pygame.draw.polygon(surf, fill_light, table)
+    pygame.draw.polygon(surf, fill_dark, pavilion)
+
+    outline = (18, 26, 36)
+    pygame.draw.polygon(surf, outline, table, 1)
+    pygame.draw.polygon(surf, outline, pavilion, 1)
+
+    # linhas de faceta internas do pavilhao (do meio da cintura ate a quilha)
+    facet_col = theme.shade(COL_GEM, -0.05)
+    pygame.draw.line(surf, facet_col, (cx - s * 0.5, girdle_y), (cx, bottom_y), 1)
+    pygame.draw.line(surf, facet_col, (cx + s * 0.5, girdle_y), (cx, bottom_y), 1)
+
+    # brilho: um pequeno triangulo claro no canto superior esquerdo da mesa
+    glint = [
+        (cx - s * 0.30, top_y + s * 0.12),
+        (cx - s * 0.02, top_y + s * 0.12),
+        (cx - s * 0.20, girdle_y - s * 0.05),
+    ]
+    pygame.draw.polygon(surf, (255, 255, 255), glint)
 
 
 def draw_hud(game, surf):
