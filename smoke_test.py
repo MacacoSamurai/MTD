@@ -5,7 +5,7 @@ rodar sem display (SDL dummy) e sem interacao nenhuma. Ele cobre o que
 seria caro validar na mao a cada mudanca de balanceamento:
 
     - as regras de crosspath (quantos caminhos, onde o secundario trava);
-    - a integridade da arvore (5 x 3 x 6 = 90 evolucoes, todas com nome,
+    - a integridade da arvore (6 x 3 x 6 = 108 evolucoes, todas com nome,
       descricao e habilidade tier 6 implementada);
     - que tier 6 exige gemas (nao ha mais limite de "1 por tipo" --
       varias torres do mesmo tipo podem chegar a tier 6, desde que o
@@ -55,7 +55,7 @@ check(up.is_legal_config([5, 2, 0]), "5-2-0 e legal")
 check(up.is_legal_config([1, 1, 1]) is False, "tres caminhos abertos e ilegal")
 
 # ---------------------------------------------------------------- arvore
-print("== integridade da arvore (5 x 3 x 6 = 90) ==")
+print(f"== integridade da arvore ({len(TOWER_TYPE_KEYS)} x 3 x 6 = {len(TOWER_TYPE_KEYS) * 18}) ==")
 total = 0
 for ttype in TOWER_TYPE_KEYS:
     paths = up.UPGRADE_TREE[ttype]
@@ -66,7 +66,8 @@ for ttype in TOWER_TYPE_KEYS:
         check("ability" in path, f"{ttype}/{path['name']} sem habilidade tier 6")
         for t in path["tiers"]:
             check(bool(t["name"]) and bool(t["desc"]), f"tier sem nome/desc em {ttype}")
-check(total == 90, f"deveriam existir 90 evolucoes, achei {total}")
+expected_total = len(TOWER_TYPE_KEYS) * 18
+check(total == expected_total, f"deveriam existir {expected_total} evolucoes, achei {total}")
 
 from towerdefense.systems.abilities import ABILITIES  # noqa: E402
 for ttype in TOWER_TYPE_KEYS:
