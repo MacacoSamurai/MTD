@@ -677,7 +677,7 @@ class Game:
             if t.ttype != "espinhos":
                 continue
             for sp in list(t.spikes):
-                if not sp.alive:
+                if not sp.alive or not sp.landed:
                     continue
                 sp_cd = sp._cooldown - dt
                 if sp_cd > 0:

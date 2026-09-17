@@ -641,25 +641,48 @@ class Tower:
             self._plant_spike(world)
 
     def _plant_spike(self, world):
-        """Escolhe uma celula aleatoria do caminho dentro de `plant_range`
-        que ainda nao tenha um espinho VIVO desta torre, e planta um novo
-        ali. Se nenhuma celula livre existir no alcance, nao faz nada
-        (tenta de novo no proximo cooldown)."""
+        """Escolhe um PONTO aleatorio (nao mais so centros de celula) em
+        cima do caminho, dentro de `plant_range`, sem sobrepor um espinho
+        VIVO desta torre, e planta um novo ali. Se nenhum ponto livre
+        existir no alcance, nao faz nada (tenta de novo no proximo
+        cooldown).
+
+        Antes disso sorteava so entre CENTROS de celula do caminho
+        (`world.map_path.cell_set`), o que deixava os espinhos visualmente
+        "presos" a um grid -- sempre no mesmo ponto dentro de cada celula.
+        Agora sorteia um deslocamento continuo dentro da celula (fracao de
+        CELL_SIZE em x e y), entao o espinho pode nascer em qualquer canto
+        dela, contanto que fique perto o bastante do centro pra colisao com
+        o inimigo continuar confiavel (ver `SPIKE_JITTER_FRAC` e
+        `update_spikes` em game.py, que usa um raio de acerto fixo)."""
         gx, gy = self.grid_pos()
         r2 = self.plant_range * self.plant_range
-        occupied = {(sp.col, sp.row) for sp in self.spikes}
+        min_spacing2 = (CELL_SIZE * 0.30) ** 2  # espinhos vivos nao podem nascer colados
+        occupied_px = [(sp.x, sp.y) for sp in self.spikes]
         candidates = []
         for (col, row) in world.map_path.cell_set:
-            if (col, row) in occupied:
-                continue
             cx = GRID_ORIGIN_X + col * CELL_SIZE + CELL_SIZE // 2
             cy = GRID_ORIGIN_Y + row * CELL_SIZE + CELL_SIZE // 2
             if (cx - gx) ** 2 + (cy - gy) ** 2 <= r2:
-                candidates.append((col, row))
+                candidates.append((col, row, cx, cy))
         if not candidates:
             return
-        col, row = random.choice(candidates)
-        self.spikes.append(Spike(col, row, self.spike_charges, self.damage, self))
+        random.shuffle(candidates)
+        jitter = CELL_SIZE * 0.30
+        for col, row, cx, cy in candidates:
+            # ate algumas tentativas de deslocamento aleatorio por celula
+            # candidata, pra achar um ponto que nao colida com um espinho
+            # ja vivo ali perto (mantendo o resultado visualmente solto
+            # em vez de sempre cair no mesmo canto quando ha conflito)
+            for _ in range(6):
+                ox = random.uniform(-jitter, jitter)
+                oy = random.uniform(-jitter, jitter)
+                px, py = cx + ox, cy + oy
+                if all((px - ex) ** 2 + (py - ey) ** 2 >= min_spacing2 for ex, ey in occupied_px):
+                    self.spikes.append(Spike(col, row, self.spike_charges, self.damage, self,
+                                              target_px=(px, py), origin_px=(gx, gy)))
+                    return
+
 
     def _update_aura(self, dt, world):
         """Auras (Era Glacial, Campo de Permafrost, Olho de Deus): em vez
