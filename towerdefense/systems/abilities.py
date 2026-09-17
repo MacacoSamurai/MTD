@@ -36,6 +36,7 @@ efeito ligado depois que a habilidade acaba.
 import math
 import random
 
+from ..config import GRID_ORIGIN_X, GRID_ORIGIN_Y, CELL_SIZE
 from ..entities.enemy import Enemy
 from . import combat
 from .vfx import Blast, Beam, Field
@@ -373,6 +374,64 @@ def _fire_visao_absoluta(world, tower, payload):
 
 
 # ----------------------------------------------------------------------------
+# ESPINHOS (ARMADILHEIRO)
+# ----------------------------------------------------------------------------
+def _eval_espinhos_ready(world, tower):
+    """As 3 habilidades de espinhos so fazem sentido se ha pista pela
+    frente (senti-las com a pista vazia seria desperdicio); qualquer
+    inimigo vivo ja basta -- sao habilidades baratas de reavaliar."""
+    if _alive(world):
+        return True
+    return None
+
+
+def _fire_campo_minado_total(world, tower, payload):
+    """Planta instantaneamente um espinho em toda celula do caminho
+    dentro do alcance de plantio que ainda nao tenha um espinho vivo
+    desta torre (respeitando o limite normal de espinhos simultaneos)."""
+    from ..entities.spike import Spike
+    gx, gy = tower.grid_pos()
+    r2 = tower.plant_range * tower.plant_range
+    occupied = {(sp.col, sp.row) for sp in tower.spikes}
+    for (col, row) in world.map_path.cell_set:
+        if len(tower.spikes) >= tower.spike_max:
+            break
+        if (col, row) in occupied:
+            continue
+        cx = GRID_ORIGIN_X + col * CELL_SIZE + CELL_SIZE // 2
+        cy = GRID_ORIGIN_Y + row * CELL_SIZE + CELL_SIZE // 2
+        if (cx - gx) ** 2 + (cy - gy) ** 2 <= r2:
+            tower.spikes.append(Spike(col, row, tower.spike_charges, tower.damage, tower))
+
+
+def _fire_praga_do_abismo(world, tower, payload):
+    """Todos os espinhos ativos da torre liberam uma explosao de veneno
+    imediatamente (dano em area centrado em cada espinho)."""
+    eff = dict(tower.effects)
+    for sp in tower.spikes:
+        if not sp.alive:
+            continue
+        world.vfx.append(Blast(sp.x, sp.y, 55, (120, 220, 110), life=0.4))
+        combat.area_damage(world, sp.x, sp.y, 55, tower.damage * 2.0, eff,
+                           apply_statuses=False)
+
+
+def _fire_golpe_das_sombras(world, tower, payload):
+    """O proximo acerto de cada espinho ativo e garantidamente critico
+    por alguns segundos (a duracao da habilidade)."""
+    for sp in tower.spikes:
+        if sp.alive:
+            sp.guaranteed_crit = True
+
+
+def _tick_golpe_das_sombras(world, tower, payload, dt):
+    # mantem o bonus em espinhos plantados durante a janela ativa
+    for sp in tower.spikes:
+        if sp.alive:
+            sp.guaranteed_crit = True
+
+
+# ----------------------------------------------------------------------------
 # TABELA DE HABILIDADES (a chave e o campo "kind" em upgrades.py)
 # ----------------------------------------------------------------------------
 ABILITIES = {
@@ -399,6 +458,11 @@ ABILITIES = {
     "execucao_automatica": {"evaluate": _eval_support(3), "tick": _tick_execucao_automatica},
     "visao_absoluta": {"evaluate": _eval_support(4), "fire": _fire_visao_absoluta,
                        "global_amp": 1.10},
+    # --- espinhos (armadilheiro) ---
+    "campo_minado_total": {"evaluate": _eval_espinhos_ready, "fire": _fire_campo_minado_total},
+    "praga_do_abismo": {"evaluate": _eval_espinhos_ready, "fire": _fire_praga_do_abismo},
+    "golpe_das_sombras": {"evaluate": _eval_espinhos_ready, "fire": _fire_golpe_das_sombras,
+                          "tick": _tick_golpe_das_sombras},
 }
 
 

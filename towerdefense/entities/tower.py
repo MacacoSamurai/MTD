@@ -15,6 +15,7 @@ from .. import upgrades as up
 from ..systems import combat
 from ..systems.vfx import Field
 from .projectile import Projectile
+from .spike import Spike
 
 
 def tower_color(level):
@@ -101,6 +102,18 @@ def _shape_points(shape, cx, cy, radius, extra_rotation=0.0):
         return _polygon_points(cx, cy, radius * 1.15, 4, -math.pi / 2, y_scale=1.3, extra_rotation=extra_rotation)
     if shape == "circle":  # canhao
         return None
+    if shape == "spikes":  # armadilheiro: estrela quebrada (8 pontas irregulares)
+        pts = []
+        cos_e, sin_e = math.cos(extra_rotation), math.sin(extra_rotation)
+        for i in range(8):
+            ang = i * (math.pi / 4)
+            r = radius * (1.0 if i % 2 == 0 else 0.55)
+            lx = math.cos(ang) * r
+            ly = math.sin(ang) * r
+            rx = lx * cos_e - ly * sin_e
+            ry = lx * sin_e + ly * cos_e
+            pts.append((cx + rx, cy + ry))
+        return pts
     return _polygon_points(cx, cy, radius, 8, 0.0, extra_rotation=extra_rotation)  # fallback p/ tipo novo sem forma definida
 
 
@@ -204,6 +217,8 @@ def _body_edge_dist(shape, radius, ang):
         a = radius * 1.15
         b = radius * 1.15 * 1.3
         return 1.0 / (abs(math.cos(ang)) / a + abs(math.sin(ang)) / b)
+    if shape == "spikes":
+        return radius * 0.8  # aproximacao (forma irregular); nunca desenha cano mesmo
     return _regular_polygon_edge_dist(ang, 0.0, 8, radius)
 
 
@@ -276,13 +291,15 @@ def draw_tower_shape(surf, cx, cy, ttype, level=1, angle=None, radius=None,
     ang = angle if angle is not None else _NEUTRAL_ANGLE
     body_rotation = ang - _NEUTRAL_ANGLE
     shape = TOWER_TYPES[ttype]["tower_shape"]
-    bspec = BARREL_SPECS.get(ttype, _DEFAULT_BARREL)
 
     # cano: mesmo desenho "por baixo" usado no jogo de verdade -- ver
     # comentario longo em Tower.draw sobre a ordem cano -> base -> corpo.
-    bpts = _barrel_points(cx, cy, ang, radius, shape, bspec)
-    pygame.draw.polygon(surf, outline, bpts)
-    pygame.draw.polygon(surf, (15, 15, 18), bpts, 2)
+    # A torre de espinhos nao mira/atira, entao nao tem cano nenhum.
+    if shape != "spikes":
+        bspec = BARREL_SPECS.get(ttype, _DEFAULT_BARREL)
+        bpts = _barrel_points(cx, cy, ang, radius, shape, bspec)
+        pygame.draw.polygon(surf, outline, bpts)
+        pygame.draw.polygon(surf, (15, 15, 18), bpts, 2)
 
     _draw_shape(surf, shape, cx, cy, radius + 4, (24, 26, 32), extra_rotation=body_rotation)
     _draw_shape(surf, shape, cx, cy, radius, color, outline_color=outline, outline_width=3,
@@ -344,6 +361,9 @@ class Tower:
         self.ability_ready_for = 0.0  # ha quanto tempo esta pronta e a IA segura
         self.ability_tick = 0.0
         self.ability_eval_timer = 0.0
+        # espinhos plantados por ESTA torre (so usado por ttype="espinhos";
+        # ver Spike em entities/spike.py e Game.update_spikes)
+        self.spikes = []
         self.recalc_stats()
         # posicao visual (para animacao de drag)
         self.drag_offset = (0, 0)
@@ -382,6 +402,16 @@ class Tower:
         self.effects = self.build_effects()
         # compatibilidade com a UI antiga de tooltip (menus.draw_tower_range_hover)
         self.slow = self.effects.get("slow")
+
+        # --- torre "espinhos": nao mira/atira, planta no caminho ---
+        if spec.get("no_targeting", False):
+            self.plant_range = self.range  # reaproveita `range` como raio de plantio
+            self.spike_charges = int(spec["base_charges"] + (lvl - 1) // 2
+                                      + m.get("spike_charges_add", 0))
+            self.spike_max = int(spec["base_max_spikes"] + (lvl - 1) // 3
+                                  + m.get("spike_max_add", 0))
+            self.plant_range *= m.get("spike_range_mult", 1.0)
+            self.plant_count = 1 + int(m.get("spike_plant_count_add", 0))
 
     def build_effects(self):
         """Traduz os `mods` (percentuais/fracoes) no dicionario de efeitos
@@ -541,6 +571,11 @@ class Tower:
         if self.being_dragged:
             return
         self.cooldown -= dt
+
+        if TOWER_TYPES[self.ttype].get("no_targeting", False):
+            self._update_spikes(dt, world)
+            return
+
         self._update_aura(dt, world)
 
         gx, gy = self.grid_pos()
@@ -586,6 +621,45 @@ class Tower:
                 shape=spec["proj_shape"], angle=base_angle + offset,
                 max_dist=self.range * 1.8,
             ))
+
+    def _update_spikes(self, dt, world):
+        """Torre "espinhos": em vez de mirar/atirar, planta um (ou mais,
+        com o upgrade certo) espinho novo no caminho a cada cooldown, se
+        ainda nao estiver no limite de espinhos simultaneos vivos."""
+        for sp in self.spikes:
+            sp.update(world, dt)
+        self.spikes = [sp for sp in self.spikes if sp.alive]
+
+        if self.cooldown > 0:
+            return
+        self.cooldown = self.fire_rate
+        if len(self.spikes) >= self.spike_max:
+            return
+        for _ in range(self.plant_count):
+            if len(self.spikes) >= self.spike_max:
+                break
+            self._plant_spike(world)
+
+    def _plant_spike(self, world):
+        """Escolhe uma celula aleatoria do caminho dentro de `plant_range`
+        que ainda nao tenha um espinho VIVO desta torre, e planta um novo
+        ali. Se nenhuma celula livre existir no alcance, nao faz nada
+        (tenta de novo no proximo cooldown)."""
+        gx, gy = self.grid_pos()
+        r2 = self.plant_range * self.plant_range
+        occupied = {(sp.col, sp.row) for sp in self.spikes}
+        candidates = []
+        for (col, row) in world.map_path.cell_set:
+            if (col, row) in occupied:
+                continue
+            cx = GRID_ORIGIN_X + col * CELL_SIZE + CELL_SIZE // 2
+            cy = GRID_ORIGIN_Y + row * CELL_SIZE + CELL_SIZE // 2
+            if (cx - gx) ** 2 + (cy - gy) ** 2 <= r2:
+                candidates.append((col, row))
+        if not candidates:
+            return
+        col, row = random.choice(candidates)
+        self.spikes.append(Spike(col, row, self.spike_charges, self.damage, self))
 
     def _update_aura(self, dt, world):
         """Auras (Era Glacial, Campo de Permafrost, Olho de Deus): em vez

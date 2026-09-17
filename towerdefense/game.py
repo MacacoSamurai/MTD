@@ -649,6 +649,35 @@ class Game:
     # ------------------------------------------------------------------
     # UPDATE
     # ------------------------------------------------------------------
+    def update_spikes(self, dt):
+        """Colisao entre inimigos e os espinhos plantados no caminho (torre
+        "espinhos"): quando um inimigo entra na celula de um espinho vivo,
+        leva um acerto. Cada inimigo so pode ser furado por um dado
+        espinho uma vez por "passagem" -- usamos um raio pequeno (metade
+        da celula) em vez da celula inteira, pra o furo acontecer perto
+        do centro em vez de assim que o inimigo encosta na borda."""
+        hit_radius = CELL_SIZE * 0.35
+        r2 = hit_radius * hit_radius
+        # cooldown de "recarga de furo" por espinho, pra nao acertar o
+        # mesmo inimigo parado em cima a cada frame (60x/s)
+        for t in self.towers.values():
+            if t.ttype != "espinhos":
+                continue
+            for sp in list(t.spikes):
+                if not sp.alive:
+                    continue
+                sp_cd = sp._cooldown - dt
+                if sp_cd > 0:
+                    sp._cooldown = sp_cd
+                    continue
+                for e in self.enemies:
+                    if not e.alive:
+                        continue
+                    if (e.x - sp.x) ** 2 + (e.y - sp.y) ** 2 <= r2:
+                        sp.try_hit(self, e)
+                        sp._cooldown = 0.35  # pequena janela antes de poder furar de novo
+                        break
+
     def update(self, dt):
         self.mouse_pos = self.window_to_canvas(pygame.mouse.get_pos())
         if self.state in ("map_select", "main_menu"):
@@ -671,6 +700,10 @@ class Game:
         # torres/projeteis/habilidades enxergam inimigos, projeteis e vfx)
         for t in self.towers.values():
             t.update(dt, self)
+
+        # colisao inimigo x espinho: feita aqui (nao dentro de Tower.update)
+        # porque precisa varrer os inimigos, que a torre nao enxerga sozinha
+        self.update_spikes(dt)
 
         # habilidades tier 6: rodam DEPOIS das torres pra enxergarem o
         # estado ja atualizado da pista neste frame
@@ -704,6 +737,13 @@ class Game:
             if e.reached_end:
                 if e.try_second_chance(self.meta.second_chance_prob()):
                     self.add_floating_text(e.x, e.y - 22, "SEGUNDA CHANCE!", COL_GEM)
+                    continue
+                if e.is_boss:
+                    # boss que passou de verdade (nao foi salvo pela segunda
+                    # chance) e HITKILL: mata na hora, indepenente de
+                    # quantas vidas restam.
+                    self.lives = 0
+                    self.game_over = True
                     continue
                 self.lives -= 1
                 if self.lives <= 0:
@@ -749,6 +789,11 @@ class Game:
 
         for e in self.enemies:
             e.draw(self.canvas, offset)
+
+        for t in self.towers.values():
+            if t.ttype == "espinhos":
+                for sp in t.spikes:
+                    sp.draw(self.canvas, offset)
 
         for p in self.projectiles:
             p.draw(self.canvas, offset)
