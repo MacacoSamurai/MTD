@@ -14,7 +14,7 @@ from .config import (
     GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_COLS, GRID_ROWS, CELL_SIZE,
     CLICK_DRAG_THRESHOLD, COL_GOLD, COL_GEM, COL_RED, TOP_HUD_HEIGHT,
     TOWER_PANEL_WIDTH, TOWER_PANEL_SLIDE_SPEED, TOWER_PANEL_DOUBLE_CLICK_MS,
-    TIER6_GEM_COST,
+    TIER6_GEM_COST, TOWER_TYPES,
 )
 from .paths import MapPath
 from .maps import DEFAULT_MAP_ID
@@ -214,13 +214,14 @@ class Game:
         True se a compra foi concluida (ouro descontado, torre criada)."""
         if cell is None or cell in self.towers or cell in self.map_path.cell_set:
             return False
-        if self.gold < self.tower_cost:
+        cost = self.tower_cost_for(ttype)
+        if self.gold < cost:
             return False
-        self.gold -= self.tower_cost
+        self.gold -= cost
         start_level = 1 + int(self.meta.start_tower_level_bonus())
-        t = Tower(cell[0], cell[1], ttype=ttype, level=start_level, invested=self.tower_cost)
+        t = Tower(cell[0], cell[1], ttype=ttype, level=start_level, invested=cost)
         self.towers[cell] = t
-        self.add_floating_text(*t.grid_pos(), f"-{self.tower_cost}g", COL_GOLD)
+        self.add_floating_text(*t.grid_pos(), f"-{cost}g", COL_GOLD)
         return True
 
     # ------------------------------------------------------------------
@@ -242,11 +243,23 @@ class Game:
         return True
 
     # ------------------------------------------------------------------
-    def recalc_tower_cost(self):
-        """Recalcula o custo de compra de torre novo, considerando a onda
-        atual e os descontos permanentes comprados com gemas."""
+    def tower_cost_for(self, ttype):
+        """Custo de compra de uma torre NOVA do tipo dado, considerando a
+        onda atual, o multiplicador de preco por tipo (`buy_cost_factor`
+        em TOWER_TYPES -- torres de elite como sniper/canhao pesado sao
+        mais caras de comprar, nao so de evoluir) e os descontos
+        permanentes comprados com gemas."""
         raw = TOWER_BASE_COST + (self.wave_mgr.wave_num - 1) * 4
-        self.tower_cost = max(10, int(round(raw * self.meta.tower_cost_mult())))
+        factor = TOWER_TYPES[ttype].get("buy_cost_factor", 1.0)
+        return max(10, int(round(raw * factor * self.meta.tower_cost_mult())))
+
+    def recalc_tower_cost(self):
+        """Recalcula `self.tower_cost`, o preco de referencia (tipo
+        "canhao", fator 1.0) usado onde ainda nao se sabe qual tipo o
+        jogador vai comprar (ex.: checagem generica de "tem ouro pra
+        alguma torre?"). O preco de cada card na loja usa
+        `tower_cost_for(ttype)`, nao este valor generico."""
+        self.tower_cost = self.tower_cost_for("canhao")
 
     # ------------------------------------------------------------------
     def skip_current_wave(self):
@@ -477,7 +490,7 @@ class Game:
         if self.selected_shop_type is not None:
             if cell in self.towers or cell in self.map_path.cell_set:
                 return  # celula ocupada/e caminho: ignora, mantem selecionado
-            if self.gold < self.tower_cost:
+            if self.gold < self.tower_cost_for(self.selected_shop_type):
                 cx, cy = (GRID_ORIGIN_X + cell[0] * CELL_SIZE + CELL_SIZE // 2,
                           GRID_ORIGIN_Y + cell[1] * CELL_SIZE + CELL_SIZE // 2)
                 self.add_floating_text(cx, cy, "Sem ouro!", COL_RED)

@@ -123,6 +123,16 @@ TOWER_LEVEL_NAMES = ["Recruta", "Soldado", "Veterano", "Elite", "Campeao", "Mest
 # Cada tipo tem sua propria progressao de dano/alcance/cadencia e um
 # comportamento especial que se intensifica com o nivel (vindo de merges).
 # Torres so se fundem com outra do MESMO tipo E MESMO nivel.
+#
+# `buy_cost_factor` multiplica `TOWER_BASE_COST` no preco de COMPRA
+# (Game.tower_cost_for) -- antes do rebalanceamento, toda torre custava
+# o mesmo pra comprar e so o preco de UPGRADE (TYPE_COST_FACTOR, em
+# upgrades.py) variava por tipo. Isso fazia uma torre estritamente
+# melhor em tudo (ex.: canhao pesado) nao ter nenhuma desvantagem real
+# antes mesmo de qualquer upgrade. Agora o preco de entrada tambem
+# reflete o poder base: torres de nicho (espinhos/flecha) sao baratas
+# pra comprar em quantidade; torres de elite (sniper/canhao pesado) sao
+# caras logo na primeira compra, nao so ao evoluir.
 # ----------------------------------------------------------------------------
 TOWER_TYPES = {
     "canhao": {
@@ -133,57 +143,63 @@ TOWER_TYPES = {
         "splash_from_lvl": 3, "splash_base": 24, "splash_step": 6,
         "proj_speed": 420, "proj_shape": "circle",
         "tower_shape": "circle",
+        "buy_cost_factor": 1.00,
     },
     "flecha": {
         "label": "Torre de Flechas",
-        "desc": "Ataca muito rapido, dano baixo por tiro.",
+        "desc": "Barata e rapidissima; ótima contra hordas, fraca contra armadura pesada.",
         "base_color": (140, 230, 120),
-        "base_range": 130, "base_damage": 6, "base_rate": 0.28,
+        "base_range": 130, "base_damage": 7, "base_rate": 0.24,
         "splash_from_lvl": None, "splash_base": 0, "splash_step": 0,
         "proj_speed": 620, "proj_shape": "arrow",
         "tower_shape": "triangle",
+        "buy_cost_factor": 0.80,
     },
     "gelo": {
         "label": "Torre de Gelo",
-        "desc": "Dano baixo, mas sempre desacelera o alvo.",
+        "desc": "Dano baixo, mas sempre desacelera o alvo com forca.",
         "base_color": (140, 220, 255),
-        "base_range": 105, "base_damage": 5, "base_rate": 0.55,
+        "base_range": 105, "base_damage": 5.5, "base_rate": 0.55,
         "splash_from_lvl": 4, "splash_base": 30, "splash_step": 8,
         "proj_speed": 380, "proj_shape": "shard",
-        "always_slow": (0.55, 1.0),
+        "always_slow": (0.48, 1.0),
         "tower_shape": "hexagon",
+        "buy_cost_factor": 0.90,
     },
     "canhao_pesado": {
         "label": "Canhao Pesado",
-        "desc": "Tiro lento e caro, dano gigante em area.",
+        "desc": "O soco de area mais caro do jogo: tiro lento, alcance curto, dano gigante.",
         "base_color": (255, 140, 70),
-        "base_range": 135, "base_damage": 46, "base_rate": 1.35,
+        "base_range": 115, "base_damage": 46, "base_rate": 1.75,
         "splash_from_lvl": 1, "splash_base": 34, "splash_step": 7,
         "proj_speed": 340, "proj_shape": "square",
         "tower_shape": "square",
+        "buy_cost_factor": 1.55,
     },
     "sniper": {
         "label": "Sniper",
-        "desc": "Alcance enorme, dano alto, cadencia lenta.",
+        "desc": "Alcance imenso e dano alto, mas cadencia bem lenta e sem splash.",
         "base_color": (230, 90, 220),
-        "base_range": 260, "base_damage": 38, "base_rate": 1.1,
+        "base_range": 280, "base_damage": 38, "base_rate": 1.5,
         "splash_from_lvl": None, "splash_base": 0, "splash_step": 0,
         "proj_speed": 900, "proj_shape": "line",
         "armor_pierce": True,
         "tower_shape": "diamond",
+        "buy_cost_factor": 1.35,
     },
     "espinhos": {
         "label": "Armadilheiro",
-        "desc": "Planta espinhos no caminho; nao mira, nao erra, ignora evasao.",
+        "desc": "Barata, cobre o caminho inteiro; nao mira, nao erra, ignora evasao.",
         "base_color": (170, 140, 90),
         # sem "mira" tradicional: plant_range é o raio em que ela pode
         # plantar espinhos no caminho (analogo ao base_range das outras).
-        "base_range": 130, "base_damage": 10, "base_rate": 1.4,
-        "base_charges": 2, "base_max_spikes": 3,
+        "base_range": 130, "base_damage": 11.5, "base_rate": 1.4,
+        "base_charges": 2, "base_max_spikes": 4,
         "splash_from_lvl": None, "splash_base": 0, "splash_step": 0,
         "proj_speed": 0, "proj_shape": None,
         "no_targeting": True,  # nao mira/atira: ver Tower.update
         "tower_shape": "spikes",
+        "buy_cost_factor": 0.75,
     },
 }
 TOWER_TYPE_KEYS = list(TOWER_TYPES.keys())

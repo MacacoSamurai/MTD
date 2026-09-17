@@ -188,7 +188,8 @@ def _draw_shop_mode(game, surf, panel_x):
             continue  # esta sendo desenhada seguindo o mouse, nao aqui
         spec = TOWER_TYPES[ttype]
         color = spec["base_color"]
-        affordable = game.gold >= game.tower_cost
+        cost = game.tower_cost_for(ttype)
+        affordable = game.gold >= cost
         hovered = rect.collidepoint(game.mouse_pos)
         selected = game.selected_shop_type == ttype
 
@@ -217,7 +218,7 @@ def _draw_shop_mode(game, surf, panel_x):
         surf.blit(lbl, (rect.x + 44, rect.y + 12))
 
         cost_col = COL_GOLD if affordable else COL_TEXT_DIM
-        cost_txt = font_cost.render(f"{game.tower_cost}g", True, cost_col)
+        cost_txt = font_cost.render(f"{cost}g", True, cost_col)
         crect = cost_txt.get_rect()
         crect.topright = (rect.right - 10, rect.y + 12)
         surf.blit(cost_txt, crect)
