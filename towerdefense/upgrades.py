@@ -57,6 +57,7 @@ TYPE_COST_FACTOR = {
     "gelo": 0.90,
     "canhao_pesado": 1.25,
     "sniper": 1.15,
+    "espinhos": 0.95,
 }
 
 # Cor de cada caminho (usada na UI e no brilho da torre especializada).
@@ -66,6 +67,7 @@ PATH_COLORS = {
     "gelo": [(150, 225, 255), (110, 160, 255), (200, 240, 255)],
     "canhao_pesado": [(255, 110, 80), (255, 190, 90), (200, 120, 255)],
     "sniper": [(255, 90, 140), (255, 200, 120), (120, 230, 220)],
+    "espinhos": [(150, 200, 90), (110, 200, 120), (200, 90, 110)],
 }
 
 MAX_TIER = 6
@@ -462,12 +464,111 @@ _SNIPER = [
     },
 ]
 
+# ============================================================================
+# 6. ESPINHOS ("ARMADILHEIRO") -- planta espinhos fixos no caminho, sem
+# mira/projetil; ver entities/spike.py e Tower.update para o disparo.
+#
+# Mods proprios desta torre (nao usados por nenhuma outra, mas seguindo
+# os MESMOS sufixos de `combine_mods` acima):
+#   spike_charges_add     -> soma cargas (acertos) por espinho
+#   spike_max_add         -> soma ao limite de espinhos simultaneos
+#   spike_range_mult      -> multiplica o raio de plantio
+#   spike_plant_count_add -> soma quantos espinhos ela planta por "disparo"
+#   spike_poison_dps / _time / _shred -> veneno proprio do espinho (nao usa
+#     poison_dps padrao pra nao se confundir com o das flechas: aplicado
+#     manualmente por Spike, nao por combat._apply_statuses)
+#   spike_slow_factor / _time -> lentidao leve ao pisar (Farpas Lentas)
+#   spike_pool_dps / _time / _radius -> poca toxica residual
+#   spike_free_on_kill     -> booleano: matar nao gasta carga
+#   spike_recharge_on_kill -> booleano: matar repoe a carga do espinho
+# ============================================================================
+_ESPINHOS = [
+    {
+        "name": "Armadilheiro",
+        "short": "Quantidade e cobertura",
+        "tiers": [
+            _u("Espinhos Reforcados", "Cada espinho aguenta mais acertos.",
+               spike_charges_add=1),
+            _u("Fileira Dupla", "Mais um espinho simultaneo no caminho.",
+               spike_max_add=1),
+            _u("Plantio Rapido", "Reduz o intervalo entre plantios.",
+               rate_mult=0.75),
+            _u("Campo Minado", "Aumenta a area em que ela pode plantar.",
+               spike_range_mult=1.35),
+            _u("Arsenal do Armadilheiro", "Mais espinhos simultaneos e mais cargas.",
+               spike_max_add=2, spike_charges_add=1),
+            _u("MESTRE ARMADILHEIRO", "Planta varios espinhos por vez, no alcance e "
+               "capacidade maximos.",
+               spike_plant_count_add=2, spike_max_add=3, spike_charges_add=2,
+               spike_range_mult=1.5, rate_mult=0.85),
+        ],
+        "ability": _ability(
+            "CAMPO MINADO TOTAL",
+            "Planta instantaneamente espinhos em todas as celulas do caminho "
+            "dentro do alcance.",
+            "campo_minado_total", cooldown=26.0),
+    },
+    {
+        "name": "Veneno Corrosivo",
+        "short": "Dano continuo e corrosao",
+        "tiers": [
+            _u("Ponta Envenenada", "Os espinhos aplicam veneno ao acertar.",
+               spike_poison_dps=0.30, spike_poison_time=3.0),
+            _u("Corrosao", "O veneno tambem quebra a armadura do alvo.",
+               spike_poison_shred=4),
+            _u("Farpas Lentas", "Quem pisa no espinho tambem e desacelerado.",
+               spike_slow_factor=0.75, spike_slow_time=1.2),
+            _u("Praga Persistente", "Veneno mais forte e duradouro, empilhavel.",
+               spike_poison_dps=0.35, spike_poison_time=2.0),
+            _u("Pantano Toxico", "Espinhos acertados deixam uma poca que continua "
+               "envenenando por um tempo.",
+               spike_pool_dps=0.5, spike_pool_time=3.0, spike_pool_radius=44),
+            _u("CEMITERIO VENENOSO", "Veneno maximizado e chance de explodir numa "
+               "nuvem toxica que atinge vizinhos.",
+               spike_poison_dps=0.6, spike_poison_time=2.0, spike_poison_shred=6,
+               spike_pool_dps=0.8, spike_pool_time=4.0, spike_pool_radius=60,
+               spike_cloud_chance=0.35),
+        ],
+        "ability": _ability(
+            "PRAGA DO ABISMO",
+            "Todos os espinhos ativos da torre liberam uma explosao de veneno "
+            "imediatamente.",
+            "praga_do_abismo", cooldown=28.0),
+    },
+    {
+        "name": "Emboscada",
+        "short": "Critico e exploracao de fraqueza",
+        "tiers": [
+            _u("Espinhos Camuflados", "Quase invisiveis no chao (so estetico).",
+               spike_hidden=True),
+            _u("Golpe Certeiro", "Chance de critico ao acertar.",
+               crit_chance=0.25, crit_mult=2.2),
+            _u("Fenda nas Placas", "Dano bonus contra inimigos pesados/blindados.",
+               heavy_mult=1.70),
+            _u("Emboscada Perfeita", "Critico maior e mais frequente.",
+               crit_chance=0.15, crit_mult=1.3),
+            _u("Armadilha Mortal", "Matar com um espinho nao gasta a carga dele.",
+               spike_free_on_kill=True),
+            _u("ARMADILHA DO ABISMO", "Todo acerto tem chance alta de critico "
+               "devastador; matar repoe a carga do espinho.",
+               crit_chance=0.30, crit_mult=2.0, heavy_mult=1.50,
+               spike_recharge_on_kill=True),
+        ],
+        "ability": _ability(
+            "GOLPE DAS SOMBRAS",
+            "O proximo acerto de cada espinho ativo e garantidamente critico "
+            "por alguns segundos.",
+            "golpe_das_sombras", cooldown=24.0, duration=5.0),
+    },
+]
+
 UPGRADE_TREE = {
     "canhao": _CANHAO,
     "flecha": _FLECHA,
     "gelo": _GELO,
     "canhao_pesado": _CANHAO_PESADO,
     "sniper": _SNIPER,
+    "espinhos": _ESPINHOS,
 }
 
 

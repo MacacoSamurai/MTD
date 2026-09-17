@@ -172,6 +172,19 @@ TOWER_TYPES = {
         "armor_pierce": True,
         "tower_shape": "diamond",
     },
+    "espinhos": {
+        "label": "Armadilheiro",
+        "desc": "Planta espinhos no caminho; nao mira, nao erra, ignora evasao.",
+        "base_color": (170, 140, 90),
+        # sem "mira" tradicional: plant_range é o raio em que ela pode
+        # plantar espinhos no caminho (analogo ao base_range das outras).
+        "base_range": 130, "base_damage": 10, "base_rate": 1.4,
+        "base_charges": 2, "base_max_spikes": 3,
+        "splash_from_lvl": None, "splash_base": 0, "splash_step": 0,
+        "proj_speed": 0, "proj_shape": None,
+        "no_targeting": True,  # nao mira/atira: ver Tower.update
+        "tower_shape": "spikes",
+    },
 }
 TOWER_TYPE_KEYS = list(TOWER_TYPES.keys())
 
