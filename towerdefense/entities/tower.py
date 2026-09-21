@@ -18,6 +18,25 @@ from .projectile import Projectile
 from .spike import Spike
 
 
+# ----------------------------------------------------------------------
+# PREFERENCIA DE ALVO (estilo Bloons TD)
+# ----------------------------------------------------------------------
+# Cada entrada e (chave, rotulo curto, rotulo do botao). A ORDEM aqui e a
+# ordem de ciclo no painel (ui/tower_panel.py) e tambem a ordem dos
+# icones desenhados. "first"/"last" usam o progresso no caminho
+# (`enemy.dist`, 0 = acabou de spawnar); "strongest"/"weakest" usam
+# `danger_score` (mesma conta que a IA de habilidades usa: vida x
+# pesado/boss x quanto avancou); "closest" usa distancia ate a torre.
+TARGET_PRIORITIES = [
+    ("first", "1o", "Primeiro (mais perto de vazar)"),
+    ("last", "Ult", "Ultimo (mais atras na fila)"),
+    ("strongest", "For", "Mais forte (maior ameaca)"),
+    ("weakest", "Frc", "Mais fraco (menor ameaca)"),
+    ("closest", "Prx", "Mais perto desta torre"),
+]
+_TARGET_PRIORITY_KEYS = [k for k, _, _ in TARGET_PRIORITIES]
+
+
 def tower_color(level):
     if level - 1 < len(TOWER_LEVEL_COLORS):
         return TOWER_LEVEL_COLORS[level - 1]
@@ -349,6 +368,12 @@ class Tower:
         self.invested = invested
         self.cooldown = 0.0
         self.target = None
+        # preferencia de alvo escolhida pelo JOGADOR no painel (estilo
+        # Bloons TD). None = segue o padrao da torre (mod `target_priority`
+        # da arvore se houver algum tier comprado nesse sentido, senao
+        # "first"). Uma vez escolhida manualmente, sobrepoe o mod da
+        # arvore ate o jogador ciclar de volta pra "seguir upgrade".
+        self.target_priority = None
         # rajada: tiros extras do MESMO ataque, disparados com um
         # intervalinho entre si (mod `burst_add`)
         self.pending_burst = 0
@@ -540,28 +565,52 @@ class Tower:
     # ------------------------------------------------------------------
     # COMBATE
     # ------------------------------------------------------------------
+    def effective_target_priority(self):
+        """Preferencia de alvo em uso agora: a escolhida manualmente pelo
+        jogador (`self.target_priority`) ou, se ele nunca mexeu, o padrao
+        da torre -- "strongest" quando algum tier da arvore ja da isso de
+        graca (caminhos Cacador/Executor/Deus do Tiro), senao "first"."""
+        if self.target_priority is not None:
+            return self.target_priority
+        if self.mods.get("target_priority") == "strongest":
+            return "strongest"
+        return "first"
+
+    def cycle_target_priority(self):
+        """Avanca pra proxima opcao da lista TARGET_PRIORITIES, em ordem,
+        voltando ao inicio no final. Chamado pelo clique no painel."""
+        cur = self.effective_target_priority()
+        try:
+            idx = _TARGET_PRIORITY_KEYS.index(cur)
+        except ValueError:
+            idx = -1
+        self.target_priority = _TARGET_PRIORITY_KEYS[(idx + 1) % len(_TARGET_PRIORITY_KEYS)]
+        self.target = None  # forca reavaliar o alvo atual com a regra nova
+
     def _acquire_target(self, world):
-        """Escolhe alvo dentro do alcance. O padrao e "o que esta mais
-        longe no caminho" (prestes a vazar); com o mod `target_priority`
-        = "strongest" a torre passa a cacar o inimigo mais perigoso, que
-        e a identidade dos caminhos Cacador/Executor/Deus do Tiro."""
+        """Escolhe alvo dentro do alcance segundo `effective_target_priority()`
+        (ver TARGET_PRIORITIES acima pro que cada opcao significa)."""
         gx, gy = self.grid_pos()
         r2 = self.range * self.range
-        strongest = self.mods.get("target_priority") == "strongest"
-        detector = self.effects.get("camo_detect", False)
+        priority = self.effective_target_priority()
         total = world.map_path.total_len
         best = None
-        best_score = -1.0
+        best_score = -math.inf
         for e in world.enemies:
             if not e.alive:
                 continue
-            if e.evasive and not detector:
-                # sem deteccao a torre ainda atira, mas prefere quem ela
-                # consegue acertar de forma confiavel
-                pass
             if (e.x - gx) ** 2 + (e.y - gy) ** 2 > r2:
                 continue
-            score = e.danger_score(total) if strongest else e.dist
+            if priority == "strongest":
+                score = e.danger_score(total)
+            elif priority == "weakest":
+                score = -e.danger_score(total)
+            elif priority == "last":
+                score = -e.dist
+            elif priority == "closest":
+                score = -((e.x - gx) ** 2 + (e.y - gy) ** 2)
+            else:  # "first" (padrao)
+                score = e.dist
             if score > best_score:
                 best = e
                 best_score = score

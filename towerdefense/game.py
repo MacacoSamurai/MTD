@@ -382,13 +382,25 @@ class Game:
         tower = self.selected_tower()
         if tower is None:
             return False
-        rects, back_rect, sell_rect = tower_panel.upgrade_button_rects(self.tower_panel_x)
+        rects, back_rect, sell_rect = tower_panel.upgrade_button_rects(
+            self.tower_panel_x, tower.ttype)
         if back_rect.collidepoint(pos):
             self.selected_tower_cell = None
             return True
         if sell_rect.collidepoint(pos):
             self.sell_tower(self.selected_tower_cell)
             return True
+        if not TOWER_TYPES[tower.ttype].get("no_targeting", False):
+            for prect, key in tower_panel.target_priority_rects(self.tower_panel_x, tower):
+                if prect.collidepoint(pos):
+                    if tower.target_priority == key:
+                        # clicar na opcao ja ativa volta a "seguir upgrade"
+                        # (a mesma logica de effective_target_priority)
+                        tower.target_priority = None
+                    else:
+                        tower.target_priority = key
+                    tower.target = None  # reavalia o alvo atual com a regra nova
+                    return True
         for rect, path_index in rects:
             if rect.collidepoint(pos):
                 ok, cost, reason = self.path_purchase_state(tower, path_index)

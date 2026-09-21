@@ -37,7 +37,9 @@ from ..config import (
     COL_GRID_BORDER, COL_MERGE_GLOW, TOWER_SELL_REFUND_RATIO,
 )
 from ..fonts import get_font
-from ..entities.tower import tower_color, tower_name, draw_tower_shape
+from ..entities.tower import (
+    tower_color, tower_name, draw_tower_shape, TARGET_PRIORITIES,
+)
 from .. import upgrades as up
 from . import theme
 
@@ -45,6 +47,11 @@ from . import theme
 # altura de cada card de caminho no modo upgrade
 PATH_CARD_H = 122
 PATH_CARD_GAP = 9
+
+# faixa de botoes de preferencia de alvo (estilo Bloons TD), logo abaixo
+# do cabecalho da torre e acima dos cards de caminho
+TARGET_PRIORITY_ROW_H = 34
+TARGET_PRIORITY_LABEL_H = 16
 
 
 # ----------------------------------------------------------------------
@@ -81,12 +88,43 @@ def shop_card_rects(panel_x):
     return rects
 
 
-def upgrade_header_h():
-    """Altura reservada para o botao voltar + cabecalho da torre."""
-    return 12 + 30 + 74
+def _has_targeting(ttype):
+    return not TOWER_TYPES[ttype].get("no_targeting", False)
 
 
-def upgrade_button_rects(panel_x):
+def upgrade_header_h(ttype=None):
+    """Altura reservada para o botao voltar + cabecalho da torre (+ a
+    faixa de preferencia de alvo, so quando a torre mira -- espinhos nao
+    tem o que priorizar, entao nao abre esse espaco extra e os cards de
+    caminho sobem pro lugar de sempre)."""
+    base = 12 + 30 + 74
+    if ttype is not None and not _has_targeting(ttype):
+        return base
+    return base + TARGET_PRIORITY_LABEL_H + TARGET_PRIORITY_ROW_H + 10
+
+
+def target_priority_rects(panel_x, tower):
+    """Retorna lista de (rect, key) para os botoes de preferencia de
+    alvo -- um por entrada de TARGET_PRIORITIES, em ordem, numa faixa
+    horizontal so. So chamada/desenhada para torres que miram (ver
+    `_has_targeting`); espinhos nao tem essa faixa."""
+    area = panel_area_rect()
+    area.x = panel_x
+    w = area.w - 24
+    n = len(TARGET_PRIORITIES)
+    gap = 6
+    btn_w = (w - gap * (n - 1)) // n
+    y = area.y + 12 + 30 + 74 + TARGET_PRIORITY_LABEL_H
+    rects = []
+    x = area.x + 12
+    for key, _short, _label in TARGET_PRIORITIES:
+        r = pygame.Rect(x, y, btn_w, TARGET_PRIORITY_ROW_H)
+        rects.append((r, key))
+        x += btn_w + gap
+    return rects
+
+
+def upgrade_button_rects(panel_x, ttype=None):
     """Retorna (rects, back_rect, sell_rect) para o modo de upgrade dentro
     do painel.
 
@@ -96,8 +134,11 @@ def upgrade_button_rects(panel_x):
 
     `back_rect` e `sell_rect` dividem a mesma linha do topo (voltar pra
     loja / vender a torre), lado a lado, pra nao precisar abrir espaco
-    novo no painel nem empurrar os cards de caminho pra baixo --
-    `upgrade_header_h()` continua valendo sem alteracao.
+    novo no painel nem empurrar os cards de caminho pra baixo.
+
+    `ttype` decide se a faixa de preferencia de alvo entra na conta de
+    `upgrade_header_h()` -- passe o tipo da torre selecionada (torres sem
+    mira, como espinhos, nao abrem esse espaco extra).
     """
     area = panel_area_rect()
     area.x = panel_x
@@ -107,7 +148,7 @@ def upgrade_button_rects(panel_x):
     back_rect = pygame.Rect(area.x + 12, area.y + 12, back_w, 30)
     sell_rect = pygame.Rect(back_rect.right + gap, area.y + 12,
                              w - back_w - gap, 30)
-    start_y = area.y + upgrade_header_h()
+    start_y = area.y + upgrade_header_h(ttype)
     rects = []
     for i in range(3):
         r = pygame.Rect(area.x + 12, start_y + i * (PATH_CARD_H + PATH_CARD_GAP),
@@ -280,11 +321,41 @@ def _draw_tier_pips(surf, x, y, tier, color, size=9, gap=3):
             pygame.draw.rect(surf, (72, 78, 92), rect, 1, border_radius=2)
 
 
+def _draw_target_priority_row(game, surf, panel_x, tower, area):
+    """Faixa de botoes 'estilo Bloons TD' pra escolher qual inimigo a
+    torre prioriza dentro do alcance (ver TARGET_PRIORITIES em
+    entities/tower.py). Torres sem mira propria (ex.: espinhos) nao tem
+    essa faixa -- nao ha o que priorizar."""
+    if TOWER_TYPES[tower.ttype].get("no_targeting", False):
+        return
+    font_lbl = get_font(10, bold=True)
+    lbl = font_lbl.render("PRIORIDADE DE ALVO", True, COL_TEXT_DIM)
+    label_y = area.y + 12 + 30 + 74
+    surf.blit(lbl, (area.x + 12, label_y))
+
+    current = tower.effective_target_priority()
+    font_btn = get_font(12, bold=True)
+    for rect, key in target_priority_rects(panel_x, tower):
+        short = next(s for k, s, _l in TARGET_PRIORITIES if k == key)
+        active = key == current
+        hovered = rect.collidepoint(game.mouse_pos)
+        if active:
+            fill, border = theme.shade(COL_GOLD, -0.55), COL_GOLD
+        else:
+            fill = theme.shade(COL_PANEL, 0.12 if hovered else 0.0)
+            border = COL_GRID_BORDER
+        theme.draw_panel(surf, rect, fill, border=border, radius=6,
+                          border_w=2 if active else 1, shadow=False)
+        col = COL_GOLD if active else COL_WHITE
+        txt = font_btn.render(short, True, col)
+        surf.blit(txt, txt.get_rect(center=rect.center))
+
+
 def _draw_upgrade_mode(game, surf, panel_x):
     tower = game.selected_tower()
     if tower is None:
         return
-    rects, back_rect, sell_rect = upgrade_button_rects(panel_x)
+    rects, back_rect, sell_rect = upgrade_button_rects(panel_x, tower.ttype)
     area = panel_area_rect()
     area.x = panel_x
 
@@ -327,6 +398,8 @@ def _draw_upgrade_mode(game, surf, panel_x):
         f"{tower.damage:0.0f} dmg | {tower.range:0.0f} alc | {1/tower.fire_rate:0.1f}/s",
         True, COL_TEXT_DIM)
     surf.blit(stats, (area.x + 58, back_rect.bottom + 46))
+
+    _draw_target_priority_row(game, surf, panel_x, tower, area)
 
     font_path = get_font(13, bold=True)
     font_name = get_font(13, bold=True)
