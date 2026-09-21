@@ -14,7 +14,7 @@ from .config import (
     GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_COLS, GRID_ROWS, CELL_SIZE,
     CLICK_DRAG_THRESHOLD, COL_GOLD, COL_GEM, COL_RED, TOP_HUD_HEIGHT,
     TOWER_PANEL_WIDTH, TOWER_PANEL_SLIDE_SPEED, TOWER_PANEL_DOUBLE_CLICK_MS,
-    TIER6_GEM_COST, TOWER_TYPES,
+    TIER6_GEM_COST, TOWER_TYPES, ENEMY_TYPES,
 )
 from .paths import MapPath
 from .maps import DEFAULT_MAP_ID
@@ -684,12 +684,43 @@ class Game:
                     sp._cooldown = sp_cd
                     continue
                 for e in self.enemies:
-                    if not e.alive:
+                    if not e.alive or e.flying:
                         continue
                     if (e.x - sp.x) ** 2 + (e.y - sp.y) ** 2 <= r2:
                         sp.try_hit(self, e)
                         sp._cooldown = 0.35  # pequena janela antes de poder furar de novo
                         break
+
+    def _spawn_split(self, parent):
+        """Cria os filhotes de um inimigo que "divide ao morrer" (Slime,
+        ver `splits_into`/`split_count`/`split_hp_frac` em ENEMY_TYPES).
+        Nascem na MESMA posicao do caminho onde o pai morreu (nao voltam
+        pro inicio), com uma fracao do HP dele repartida entre todos os
+        filhotes -- e por isso que a soma dos HPs dos filhotes e MENOR
+        que o HP do pai (`split_hp_frac` < 1), senao dividir seria de
+        graca. Cada filhote sai com um pequeno atraso de distancia
+        percorrida entre si, soh pra nao aparecerem 100% sobrepostos."""
+        kind = parent.splits_into
+        count = parent.split_count
+        if not kind or count <= 0 or kind not in ENEMY_TYPES:
+            return []
+        children = []
+        hp_frac_each = parent.split_hp_frac / count
+        for i in range(count):
+            c = Enemy(kind, self.wave_mgr.wave_num, self.wave_mgr.hp_mult(),
+                       self.wave_mgr.speed_mult(), self.map_path)
+            # reaplica o HP como fracao do MAX_HP JA ESCALADO do pai (nao
+            # do base do filhote), entao a divisao acompanha o quao forte
+            # o slime original estava nesta onda/mapa
+            c.max_hp = max(1.0, parent.max_hp * hp_frac_each)
+            c.hp = c.max_hp
+            # nasce um pouco antes/depois do ponto onde o pai morreu, pra
+            # nao ficarem 100% empilhados um em cima do outro
+            spread = (i - (count - 1) / 2.0) * 10.0
+            c.dist = max(0.0, parent.dist + spread)
+            c.x, c.y, c.angle = self.map_path.point_at_distance(c.dist)
+            children.append(c)
+        return children
 
     def update(self, dt):
         self.mouse_pos = self.window_to_canvas(pygame.mouse.get_pos())
@@ -743,6 +774,7 @@ class Game:
             if e.alive:
                 e.update(dt)
 
+        spawned_splits = []
         for e in self.enemies:
             if e.alive or e._processed_death:
                 continue
@@ -773,8 +805,10 @@ class Game:
                     if e.gems > 0:
                         self.gems += e.gems
                         self.add_floating_text(e.x, e.y - 22, f"+{e.gems} gema{'s' if e.gems != 1 else ''}", COL_GEM)
+                if e.splits_into:
+                    spawned_splits.extend(self._spawn_split(e))
 
-        self.enemies = [e for e in self.enemies if e.alive]
+        self.enemies = [e for e in self.enemies if e.alive] + spawned_splits
 
         self.update_floating_texts(dt)
 

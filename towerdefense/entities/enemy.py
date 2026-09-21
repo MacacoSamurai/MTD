@@ -25,7 +25,7 @@ import pygame
 from ..config import (
     ENEMY_TYPES, COL_HP_BG, COL_HP_FG, COL_RED,
     BOSS_WAVE_INTERVAL, BOSS_HP_SCALE_PER_CYCLE, BOSS_GEMS_PER_CYCLE,
-    HEAVY_ENEMY_ARMOR, EVASION_CHANCE,
+    HEAVY_ENEMY_ARMOR, EVASION_CHANCE, FLYING_DODGE_CHANCE,
 )
 from ..fonts import get_font
 
@@ -67,6 +67,15 @@ class Enemy:
         # inimigos "esquivos" (camuflados): tem chance de ignorar um acerto,
         # a menos que a torre tenha deteccao (caminho Observador da sniper).
         self.evasive = base.get("evasive", False)
+        # "voadores": esquiva FISICA e independente (ver `dodges`), e nao
+        # colidem com espinhos plantados no chao (ver Game.update_spikes
+        # e Tower._plant_spike, que ja excluem `flying` de proposito).
+        self.flying = base.get("flying", False)
+        # divisao ao morrer (Slime): ver Game.update, bloco "morreu por
+        # dano de torre". None se este tipo nao divide.
+        self.splits_into = base.get("splits_into")
+        self.split_count = base.get("split_count", 0)
+        self.split_hp_frac = base.get("split_hp_frac", 1.0)
         self.x, self.y, self.angle = map_path.point_at_distance(0)
         self.alive = True
         self.reached_end = False
@@ -238,11 +247,21 @@ class Enemy:
         self.shred_timer = max(self.shred_timer, duration)
 
     def dodges(self, detector):
-        """True se o acerto deve ser ignorado por esquiva. Torres com
-        deteccao (`camo_detect`, caminho Observador) nunca erram."""
-        if not self.evasive or detector:
-            return False
-        return random.random() < EVASION_CHANCE
+        """True se o acerto deve ser ignorado por esquiva. Duas fontes
+        INDEPENDENTES, cada uma testada separadamente (um inimigo poderia
+        no futuro ter as duas ao mesmo tempo):
+
+        - camuflagem (`evasive`): torres com deteccao (`camo_detect`,
+          caminho Observador) nunca erram por causa dela.
+        - voo (`flying`): esquiva FISICA (esta fora de alcance confiavel
+          de acerto, nao "escondido"), entao NENHUMA deteccao a anula --
+          `detector` e ignorado aqui de proposito.
+        """
+        if self.evasive and not detector and random.random() < EVASION_CHANCE:
+            return True
+        if self.flying and random.random() < FLYING_DODGE_CHANCE:
+            return True
+        return False
 
     # ------------------------------------------------------------------
     def take_damage(self, dmg, ignore_armor=False, silent=False):
@@ -275,31 +294,143 @@ class Enemy:
             return (140, 210, 255)
         return None
 
+    # ------------------------------------------------------------------
+    # SILHUETAS por tipo (ver `shape` em ENEMY_TYPES) -- cada uma so
+    # preenchimento + contorno, no mesmo espirito simples/geometrico do
+    # resto do jogo (ver entities/tower.py). Recebem o CENTRO ja em
+    # coordenadas de tela (px, py) e o raio base do tipo (r).
+    # ------------------------------------------------------------------
+    def _draw_regular_polygon(self, surf, px, py, r, sides, color, outline, rotation=0.0):
+        pts = []
+        for i in range(sides):
+            ang = rotation + i * (2 * math.pi / sides)
+            pts.append((px + r * math.cos(ang), py + r * math.sin(ang)))
+        pygame.draw.polygon(surf, color, pts)
+        pygame.draw.polygon(surf, outline, pts, 1)
+
+    def _draw_arrow_tri(self, surf, px, py, r, color, outline):
+        """Runner: triangulo apontando na direcao do movimento (self.angle),
+        pra comunicar velocidade so pela silhueta."""
+        ang = self.angle if self.angle is not None else -math.pi / 2
+        tip = (px + math.cos(ang) * r * 1.3, py + math.sin(ang) * r * 1.3)
+        back_ang1 = ang + math.pi * 0.78
+        back_ang2 = ang - math.pi * 0.78
+        p1 = (px + math.cos(back_ang1) * r, py + math.sin(back_ang1) * r)
+        p2 = (px + math.cos(back_ang2) * r, py + math.sin(back_ang2) * r)
+        pts = [tip, p1, p2]
+        pygame.draw.polygon(surf, color, pts)
+        pygame.draw.polygon(surf, outline, pts, 1)
+
+    def _draw_swarm_pair(self, surf, px, py, r, color, outline):
+        """Swarm: dois losangos pequenos colados lado a lado -- sugere
+        "vem em grupo" mesmo quando so um esta sendo desenhado."""
+        off = r * 0.62
+        for cx in (px - off, px + off):
+            rr = r * 0.72
+            pts = [(cx, py - rr), (cx + rr, py), (cx, py + rr), (cx - rr, py)]
+            pygame.draw.polygon(surf, color, pts)
+            pygame.draw.polygon(surf, outline, pts, 1)
+
+    def _draw_phantom_ring(self, surf, px, py, r, color, outline):
+        """Phantom: anel VAZADO (nao preenchido) com pontinhos internos --
+        parece "instavel/translucido", condizente com a camuflagem."""
+        layer = pygame.Surface((r * 2 + 6, r * 2 + 6), pygame.SRCALPHA)
+        cx, cy = r + 3, r + 3
+        pygame.draw.circle(layer, (*color, 90), (cx, cy), r)
+        pygame.draw.circle(layer, (*color, 230), (cx, cy), r, 2)
+        for i in range(4):
+            ang = i * (math.pi / 2) + 0.4
+            dx, dy = math.cos(ang) * r * 0.45, math.sin(ang) * r * 0.45
+            pygame.draw.circle(layer, (*color, 255), (int(cx + dx), int(cy + dy)), 2)
+        surf.blit(layer, (px - cx, py - cy))
+        pygame.draw.circle(surf, outline, (int(px), int(py)), r, 1)
+
+    def _draw_bird(self, surf, px, py, r, color, outline):
+        """Voador: silhueta em "V" (duas asas abertas pra tras, como um
+        passaro visto de cima), alinhada com a direcao do movimento --
+        formato bem mais reconhecivel a distancia do que um losango
+        alongado, e nao se confunde com nenhuma silhueta terrestre."""
+        ang = self.angle if self.angle is not None else -math.pi / 2
+        cos_a, sin_a = math.cos(ang), math.sin(ang)
+
+        def rot(lx, ly):
+            return (px + lx * cos_a - ly * sin_a, py + lx * sin_a + ly * cos_a)
+
+        nose = rot(r * 1.15, 0)
+        wing_tip1 = rot(-r * 1.05, r * 1.3)
+        wing_tip2 = rot(-r * 1.05, -r * 1.3)
+        notch = rot(-r * 0.35, 0)  # reentrancia central: da o formato de "V"/asas
+        pts = [nose, wing_tip1, notch, wing_tip2]
+        pygame.draw.polygon(surf, color, pts)
+        pygame.draw.polygon(surf, outline, pts, 1)
+        # sombra elipsoide no chao (reforca a leitura de "esta no ar")
+        shadow = pygame.Surface((int(r * 2.4), int(r * 1.1)), pygame.SRCALPHA)
+        pygame.draw.ellipse(shadow, (10, 10, 14, 70), shadow.get_rect())
+        surf.blit(shadow, (px - r * 1.2, py + r * 0.9))
+
+    def _draw_slime_blob(self, surf, px, py, r, color, outline):
+        """Slime: contorno ONDULADO (nao um circulo perfeito), pra parecer
+        gosma -- mesmo visual pro slime grande e pros filhotes menores
+        (so o raio muda), deixando claro que sao "a mesma coisa" em
+        tamanhos diferentes."""
+        bumps = 8
+        pts = []
+        for i in range(bumps):
+            ang = i * (2 * math.pi / bumps)
+            wobble = 1.0 + 0.12 * math.sin(ang * 3 + self.dist * 0.01)
+            pts.append((px + r * wobble * math.cos(ang), py + r * wobble * math.sin(ang)))
+        pygame.draw.polygon(surf, color, pts)
+        pygame.draw.polygon(surf, outline, pts, 1)
+        # brilho pequeno no canto: da uma sensacao de "superficie molhada"
+        hl_r = max(1, int(r * 0.22))
+        hl_color = tuple(min(255, c + 60) for c in color)
+        pygame.draw.circle(surf, hl_color, (int(px - r * 0.35), int(py - r * 0.35)), hl_r)
+
     def draw(self, surf, offset):
         ox, oy = offset
         px, py = self.x + ox, self.y + oy
         r = self.radius
         color = (255, 255, 255) if self.flash > 0 else self.color
-        if self.shape == "circle":
+        outline = (0, 0, 0)
+        shape = self.shape
+
+        if shape == "circle":
             pygame.draw.circle(surf, color, (int(px), int(py)), r)
-            pygame.draw.circle(surf, (0, 0, 0), (int(px), int(py)), r, 1)
-        elif self.shape == "square":
+            pygame.draw.circle(surf, outline, (int(px), int(py)), r, 1)
+        elif shape == "square":
             rect = pygame.Rect(0, 0, r * 1.8, r * 1.8)
             rect.center = (px, py)
             pygame.draw.rect(surf, color, rect, border_radius=4)
-            pygame.draw.rect(surf, (0, 0, 0), rect, 1, border_radius=4)
-        elif self.shape == "diamond":
+            pygame.draw.rect(surf, outline, rect, 2, border_radius=4)
+        elif shape == "diamond":
             pts = [(px, py - r), (px + r, py), (px, py + r), (px - r, py)]
             pygame.draw.polygon(surf, color, pts)
-            pygame.draw.polygon(surf, (0, 0, 0), pts, 1)
-        elif self.shape == "star":
+            pygame.draw.polygon(surf, outline, pts, 1)
+        elif shape == "star":
             pts = []
             for i in range(10):
                 ang = -math.pi / 2 + i * math.pi / 5
                 rr = r if i % 2 == 0 else r * 0.5
                 pts.append((px + rr * math.cos(ang), py + rr * math.sin(ang)))
             pygame.draw.polygon(surf, color, pts)
-            pygame.draw.polygon(surf, (0, 0, 0), pts, 1)
+            pygame.draw.polygon(surf, outline, pts, 1)
+        elif shape == "arrow_tri":
+            self._draw_arrow_tri(surf, px, py, r, color, outline)
+        elif shape == "swarm_pair":
+            self._draw_swarm_pair(surf, px, py, r, color, outline)
+        elif shape == "hexagon":
+            self._draw_regular_polygon(surf, px, py, r, 6, color, outline)
+        elif shape == "octagon":
+            self._draw_regular_polygon(surf, px, py, r, 8, color, outline)
+        elif shape == "phantom_ring":
+            self._draw_phantom_ring(surf, px, py, r, color, outline)
+        elif shape == "bird":
+            self._draw_bird(surf, px, py, r, color, outline)
+        elif shape == "slime_blob":
+            self._draw_slime_blob(surf, px, py, r, color, outline)
+        else:
+            pygame.draw.circle(surf, color, (int(px), int(py)), r)
+            pygame.draw.circle(surf, outline, (int(px), int(py)), r, 1)
 
         scol = self._status_color()
         if scol is not None:

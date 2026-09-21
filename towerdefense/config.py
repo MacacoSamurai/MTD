@@ -206,6 +206,11 @@ TOWER_TYPE_KEYS = list(TOWER_TYPES.keys())
 
 # ----------------------------------------------------------------------------
 # TIPOS DE INIMIGOS
+# `shape` identifica a silhueta usada em `Enemy.draw` (entities/enemy.py) --
+# cada tipo tem a SUA propria forma (nunca duas reaproveitando a mesma),
+# pra dar pra reconhecer o tipo so pela silhueta, sem precisar checar a
+# cor de perto. `flying` e `splits_into` sao mecanicas especiais (ver
+# comentarios em "voador" e "slime" abaixo).
 # ----------------------------------------------------------------------------
 ENEMY_TYPES = {
     "grunt": {
@@ -213,31 +218,71 @@ ENEMY_TYPES = {
         "gold": 8, "shape": "circle", "min_wave": 1, "armor": 0,
     },
     "runner": {
-        "color": (250, 200, 60), "radius": 9, "speed": 120, "hp": 22,
-        "gold": 7, "shape": "circle", "min_wave": 2, "armor": 0,
+        # triangulo apontando na direcao do movimento: comunica velocidade
+        # so pela silhueta, sem precisar olhar a barra de vida
+        "color": (250, 200, 60), "radius": 10, "speed": 120, "hp": 22,
+        "gold": 7, "shape": "arrow_tri", "min_wave": 2, "armor": 0,
     },
     "tank": {
+        # quadrado com borda grossa: "bloco" solido, robusto
         "color": (110, 110, 190), "radius": 18, "speed": 34, "hp": 160,
         "gold": 18, "shape": "square", "min_wave": 4, "armor": 4,
     },
     "swarm": {
+        # par de losangos colados: sugere "enxame" (varios juntos), nao
+        # so um circulo pequeno como as outras torres leves
         "color": (230, 130, 220), "radius": 7, "speed": 95, "hp": 14,
-        "gold": 4, "shape": "circle", "min_wave": 3, "armor": 0,
+        "gold": 4, "shape": "swarm_pair", "min_wave": 3, "armor": 0,
     },
     "brute": {
+        # hexagono: mais "pesado" que o quadrado do tank sem repetir a
+        # mesma silhueta
         "color": (150, 70, 40), "radius": 22, "speed": 40, "hp": 340,
-        "gold": 30, "shape": "square", "min_wave": 7, "armor": 8,
+        "gold": 30, "shape": "hexagon", "min_wave": 7, "armor": 8,
     },
     "phantom": {
         # "camuflado": tem chance de ignorar acertos de torres sem
-        # deteccao (ver EVASION_CHANCE e o caminho Observador da sniper)
+        # deteccao (ver EVASION_CHANCE e o caminho Observador da sniper).
+        # Anel vazado/pontilhado em vez de preenchido: parece "instavel",
+        # condizente com a evasao.
         "color": (170, 230, 255), "radius": 11, "speed": 85, "hp": 70,
-        "gold": 14, "shape": "diamond", "min_wave": 6, "armor": 2,
+        "gold": 14, "shape": "phantom_ring", "min_wave": 6, "armor": 2,
         "evasive": True,
     },
     "titan": {
+        # octogono grande: o maior terrestre nao-boss, forma com mais
+        # lados = leitura de "o mais imponente antes do boss"
         "color": (255, 80, 80), "radius": 28, "speed": 26, "hp": 900,
-        "gold": 70, "shape": "square", "min_wave": 12, "armor": 15,
+        "gold": 70, "shape": "octagon", "min_wave": 12, "armor": 15,
+    },
+    "voador": {
+        # "voa" por cima da pista: ignora espinhos por completo (o
+        # armadilheiro planta NO CHAO, ver Tower._plant_spike/Spike) e
+        # tem chance propria de fazer QUALQUER torre errar o tiro
+        # (FLYING_DODGE_CHANCE), independente de deteccao -- e uma
+        # esquiva "fisica" (esta fora de alcance de acerto confiavel),
+        # nao uma esquiva "de visao" como a do phantom/camo_detect, entao
+        # nenhum upgrade de deteccao a anula.
+        "color": (255, 235, 140), "radius": 10, "speed": 70, "hp": 55,
+        "gold": 12, "shape": "bird", "min_wave": 5, "armor": 0,
+        "flying": True,
+    },
+    "slime": {
+        # ao morrer, divide em filhotes menores (ver `splits_into` em
+        # Game.update -- "morreu por dano de torre"). Os filhotes usam o
+        # tipo "slime_small" (abaixo), que NAO tem `splits_into`, entao a
+        # divisao para depois de uma geracao (sem enxame infinito).
+        "color": (120, 220, 120), "radius": 16, "speed": 50, "hp": 90,
+        "gold": 10, "shape": "slime_blob", "min_wave": 6, "armor": 0,
+        "splits_into": "slime_small", "split_count": 2, "split_hp_frac": 0.6,
+    },
+    "slime_small": {
+        # filhote do slime: nao aparece em onda nenhuma (min_wave alto e
+        # irrelevante -- so nasce via `splits_into`, nunca no spawn normal
+        # de onda, ver WaveManager.build_wave_queue), menor, mais rapido,
+        # sem dividir de novo.
+        "color": (150, 235, 150), "radius": 9, "speed": 65, "hp": 20,
+        "gold": 3, "shape": "slime_blob", "min_wave": 9999, "armor": 0,
     },
     "boss": {
         "color": (255, 215, 0), "radius": 34, "speed": 22, "hp": 2200,
@@ -245,6 +290,11 @@ ENEMY_TYPES = {
         "is_boss": True, "gems": 3,
     },
 }
+
+# Chance de QUALQUER torre errar um inimigo voador a cada tiro (esquiva
+# "fisica", independente de camo_detect -- ver comentario em "voador"
+# acima e Enemy.dodges).
+FLYING_DODGE_CHANCE = 0.50
 
 # ----------------------------------------------------------------------------
 # META-UPGRADES (SHOP DE GEMAS)
