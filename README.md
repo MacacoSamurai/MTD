@@ -136,14 +136,18 @@ o limite e de 5 super torres, uma de cada. O HUD mostra os 5 slots.
 
 ## Teste
 
-Nao ha pytest no projeto, mas ha um script de validacao headless:
+A suite de testes usa **pytest** e roda headless (SDL_VIDEODRIVER
+dummy, configurado em `tests/conftest.py`):
 
 ```bash
-python smoke_test.py
+pytest                    # tudo, incluindo a simulacao de 90s (~2-3 min)
+pytest -m "not slow"      # so os testes rapidos (< 1s)
 ```
 
-Ele confere as regras de crosspath, a integridade das 90 evolucoes, o
-limite de tier 6 por tipo e roda 90 segundos de partida simulada.
+Ela confere as regras de crosspath, a integridade das 108 evolucoes
+(6 tipos x 3 caminhos x 6 tiers), o custo em gemas do tier 6, o merge
+respeitando o crosspath e roda 90 segundos de partida simulada
+(marcada `slow`).
 
 ## Instalacao e execucao
 

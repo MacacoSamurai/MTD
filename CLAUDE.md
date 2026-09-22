@@ -53,7 +53,8 @@ jogo, pois nao ha persistencia em disco).
 
 ```
 main.py                     # so cria Game() e chama .run()
-smoke_test.py               # validacao headless (ver secao "Teste" abaixo)
+pytest.ini                  # config do pytest (marker "slow", pythonpath)
+tests/                       # suite pytest (ver secao "Teste" abaixo)
 towerdefense/
 ├── config.py                # TODAS as constantes/tabelas de balanceamento
 ├── upgrades.py               # ARVORE de evolucao: 5 torres x 3 caminhos x 6 tiers
@@ -195,12 +196,19 @@ Se for adicionar um menu/tela nova, siga esse padrao (veja
   fica centralizado em `config.py` (`TOWER_TYPES`, `ENEMY_TYPES`,
   `META_UPGRADE_DEFS`) — o resto do codigo itera sobre essas tabelas,
   entao normalmente não é preciso tocar em `game.py` ou `ui/`.
-- **Sem pytest e sem persistencia em disco**, mas existe
-  `smoke_test.py` na raiz: script headless que valida crosspath,
-  integridade das 90 evolucoes, limite de tier 6 por tipo, merge ilegal
-  e roda 90 segundos de partida real (update + draw). Rodar
-  `python smoke_test.py` depois de mexer em torres/upgrades/combate. Pro
-  resto, validar na mao rodando o jogo (ou `SDL_VIDEODRIVER=dummy` +
+- **Sem persistencia em disco, mas ha suite pytest** em `tests/`
+  (config em `pytest.ini`, fixtures/helpers compartilhados em
+  `tests/conftest.py`): valida crosspath (`test_crosspath.py`),
+  integridade das 108 evolucoes e habilidades implementadas
+  (`test_upgrade_tree.py`), custo em gemas do tier 6
+  (`test_tier6_gems.py`), merge respeitando crosspath (`test_merge.py`)
+  e 90 segundos de partida real -- update + draw --
+  (`test_partida_simulada.py`, marcado `slow`). Roda headless via
+  `SDL_VIDEODRIVER=dummy`, setado automaticamente em `conftest.py`.
+  Rodar `pytest -m "not slow"` (rapido, <1s) depois de qualquer mudanca
+  em torres/upgrades/combate, e `pytest` completo (inclui a simulacao
+  de 90s, ~2-3 min) antes de fechar uma mudanca maior. Pro resto,
+  validar na mao rodando o jogo (ou `SDL_VIDEODRIVER=dummy` +
   `pygame.image.save(g.screen, ...)` pra inspecionar telas sem display,
   como foi feito pra conferir o painel da arvore).
 - **`HEIGHT` e derivado da grade, nao um numero solto**: `HEIGHT =
