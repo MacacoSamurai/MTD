@@ -44,6 +44,10 @@ class Enemy:
         base = ENEMY_TYPES[kind]
         self.map_path = map_path
         self.kind = kind
+        # onda em que este inimigo nasceu (guardado so para o sistema de
+        # save: permite recalcular hp_mult/speed_mult ao recarregar uma
+        # partida sem precisar persistir esses multiplicadores tambem)
+        self.spawn_wave = wave
         self.dist = 0.0
         self.is_boss = base.get("is_boss", False)
         boss_extra_mult = 1.0

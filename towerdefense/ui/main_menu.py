@@ -25,18 +25,30 @@ MENU_BUTTONS = [
     ("Sair", "quit"),
 ]
 
+# Botao extra, inserido no TOPO da lista so quando existe um save em
+# disco (game.has_save_file) -- ver Game.load_from_disk / save_system.py.
+CONTINUE_BUTTON = ("Continuar", "continue")
 
-def button_rects():
+
+def _active_buttons(game):
+    if game is not None and getattr(game, "has_save_file", False):
+        return [CONTINUE_BUTTON] + MENU_BUTTONS
+    return MENU_BUTTONS
+
+
+def button_rects(game=None):
     """Retorna lista de (rect, action) para os botoes do menu, empilhados
-    verticalmente e centralizados na tela."""
+    verticalmente e centralizados na tela. Inclui "Continuar" no topo
+    quando ha um save em disco (ver `game.has_save_file`)."""
+    buttons = _active_buttons(game)
     w, h = 360, 62
     gap = 20
-    n = len(MENU_BUTTONS)
+    n = len(buttons)
     total_h = n * h + (n - 1) * gap
     start_y = HEIGHT // 2 - total_h // 2 + 50
     x = WIDTH // 2 - w // 2
     rects = []
-    for i, (label, action) in enumerate(MENU_BUTTONS):
+    for i, (label, action) in enumerate(buttons):
         y = start_y + i * (h + gap)
         rects.append((pygame.Rect(x, y, w, h), action))
     return rects
@@ -196,10 +208,16 @@ def draw_main_menu(game, surf):
 
     mouse_pos = game.mouse_pos
     font_btn = get_font(23, bold=True)
-    for rect, action in button_rects():
+    active_buttons = _active_buttons(game)
+    for rect, action in button_rects(game):
         hovered = rect.collidepoint(mouse_pos)
-        label = next(lbl for lbl, act in MENU_BUTTONS if act == action)
-        col = COL_RED if action == "quit" else COL_GOLD
+        label = next(lbl for lbl, act in active_buttons if act == action)
+        if action == "quit":
+            col = COL_RED
+        elif action == "continue":
+            col = COL_GREEN
+        else:
+            col = COL_GOLD
         base_fill = COL_PANEL if not hovered else theme.shade(COL_PANEL, 0.12)
         theme.draw_panel(surf, rect, base_fill, border=col if hovered else COL_GRID_BORDER,
                           radius=12, border_w=2 if not hovered else 3)
@@ -213,7 +231,7 @@ def draw_main_menu(game, surf):
     # progresso permanente (gemas), visivel desde o menu principal porque
     # persiste entre partidas (ver Game.__init__: self.gems nao e resetado)
     font_small = get_font(14)
-    gem_y = button_rects()[-1][0].bottom + 34
+    gem_y = button_rects(game)[-1][0].bottom + 34
     gem_txt = font_small.render(f"{game.gems} gemas guardadas", True, COL_GEM)
     grect = gem_txt.get_rect(center=(WIDTH // 2 + 10, gem_y))
     draw_gem_icon(surf, grect.x - 14, grect.centery, 8)
@@ -224,6 +242,12 @@ def draw_main_menu(game, surf):
             f"{game.total_bosses_killed} bosses derrotados nesta sessao", True, COL_TEXT_DIM)
         brect = boss_txt.get_rect(center=(WIDTH // 2, gem_y + 22))
         surf.blit(boss_txt, brect)
+
+    if getattr(game, "has_save_file", False):
+        save_txt = font_small.render(
+            "Progresso salvo automaticamente em C:\\MTD", True, COL_GREEN)
+        srect2 = save_txt.get_rect(center=(WIDTH // 2, HEIGHT - 48))
+        surf.blit(save_txt, srect2)
 
     hint_txt = font_small.render("ESC a qualquer momento para sair", True, COL_TEXT_DIM)
     hrect = hint_txt.get_rect(center=(WIDTH // 2, HEIGHT - 30))

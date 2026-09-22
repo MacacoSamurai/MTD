@@ -6,7 +6,9 @@ progressao permanente via loja de gemas.
 ## Fluxo de telas
 
 1. **Menu principal** - tela de titulo com os botoes **Jogar**, **Como
-   Jogar** (abre um resumo das regras e controles) e **Sair**.
+   Jogar** (abre um resumo das regras e controles) e **Sair**. Se houver
+   uma partida salva, um botao extra **Continuar** aparece no topo (ver
+   "Save automatico" abaixo).
 2. **Selecao de mapa** - escolha um dos mapas disponiveis para comecar a
    partida. ESC volta ao menu principal.
 3. **Partida** - o jogo em si (grade, torres, ondas). Pressione **M** a
@@ -35,6 +37,39 @@ progressao permanente via loja de gemas.
 - Pressione **G** para abrir a **loja de gemas**: melhorias permanentes
   que afetam o jogo inteiro e persistem entre partidas.
 - Perca todas as vidas e o jogo acaba. Sobreviva o maximo de ondas!
+
+## Save automatico
+
+O progresso da partida em andamento (ouro, vidas, gemas, torres, onda
+atual e inimigos na tela) e salvo automaticamente em disco, na pasta
+`C:\MTD\save_game.json` (Windows). Isso garante que fechar o jogo -- ou
+o computador -- nao faz perder o progresso:
+
+- **Autosave periodico**: a cada ~8 segundos de partida.
+- **Save ao fechar**: sempre que o jogo e encerrado (fechar a janela,
+  ESC, etc.) com uma partida em andamento.
+- **Continuar**: ao abrir o jogo de novo, se existir um save, o menu
+  principal mostra o botao **Continuar**, que retoma exatamente de onde
+  parou.
+- O save e apagado automaticamente quando a partida termina em **game
+  over** (nao ha o que continuar de uma corrida ja perdida).
+- **Gemas e niveis da loja permanente** (comprados com gemas) ficam num
+  arquivo separado, `C:\MTD\meta_progress.json`, que **nunca** e apagado
+  (nem no game over): e o unico progresso que realmente deveria ser
+  "para sempre". Ele e gravado a cada mudanca (ganhar gemas ao matar um
+  boss, comprar uma melhoria), nao por timer.
+- Fora do Windows (ambientes de desenvolvimento/teste em Linux/Mac), a
+  mesma pasta `MTD` e usada dentro do diretorio do usuario, ja que
+  `C:\` nao existe nesses sistemas.
+- **Sem permissao de administrador?** Escrever direto na raiz do disco
+  `C:\` exige privilegios de admin em muitas contas padrao do Windows.
+  Se `C:\MTD` nao puder ser criado/gravado, o jogo detecta isso
+  automaticamente ao iniciar e usa `%USERPROFILE%\MTD` no lugar (sempre
+  gravavel), sem precisar de nenhuma acao do jogador. Se ate isso
+  falhar (disco cheio, politica de grupo bloqueando tudo, etc.), o erro
+  fica registrado no console/terminal usado para abrir o jogo.
+
+Veja `towerdefense/save_system.py` para os detalhes do formato salvo.
 
 ## Controles
 
