@@ -22,8 +22,13 @@ from .entities import Tower
 from .entities.enemy import Enemy
 from .systems import WaveManager, MetaUpgrades, AbilityController, combat, vfx
 from . import upgrades as up
+from . import save_system
 from .fonts import get_font
 from .ui import hud, menus, board, map_menu, main_menu, tower_panel
+
+# Autosave a cada N segundos de jogo (alem do save imediato ao fechar o
+# jogo) -- ver Game.update / Game._autosave_tick.
+AUTOSAVE_INTERVAL = 8.0
 
 
 class Game:
@@ -55,6 +60,14 @@ class Game:
         # como e comum em jogos com "prestige"/meta-progressao.
         self.gems = 0
         self.meta = MetaUpgrades()
+        # progresso permanente (gemas + niveis de melhorias compradas com
+        # gemas): persiste entre partidas E entre execucoes do jogo (ver
+        # save_system.save_meta/load_meta). Carregado aqui, ANTES do
+        # primeiro reset() la embaixo, pra o ouro inicial ja sair
+        # calculado com os upgrades permanentes certos.
+        meta_data = save_system.load_meta()
+        if meta_data is not None:
+            save_system.apply_meta_data(self, meta_data)
         self.total_bosses_killed = 0
         self.meta_shop_open = False
         self.gem_button_rect = None
@@ -67,6 +80,54 @@ class Game:
         self.selected_map_id = DEFAULT_MAP_ID
         self.map_path = MapPath(self.selected_map_id)
         self.reset()
+        # save em disco: ver save_system.py (grava em C:\MTD\save_game.json).
+        # `has_save_file` so controla se o menu principal mostra o botao
+        # "Continuar" -- o carregamento de verdade so acontece se o
+        # jogador clicar nele (load_from_disk).
+        self.has_save_file = save_system.has_save()
+        self.autosave_timer = AUTOSAVE_INTERVAL
+
+    # ------------------------------------------------------------------
+    # SAVE / LOAD EM DISCO
+    # ------------------------------------------------------------------
+    def load_from_disk(self):
+        """Chamado pelo botao 'Continuar' do menu principal: le o save,
+        reconstroi o mapa/estado da partida e entra direto no jogo."""
+        data = save_system.load_game()
+        if data is None:
+            self.has_save_file = False
+            self.state = "map_select"
+            return
+        self.selected_map_id = data.get("map_id", DEFAULT_MAP_ID)
+        self.map_path = MapPath(self.selected_map_id)
+        self.reset()
+        save_system.apply_save_data(self, data)
+        self.state = "playing"
+
+    def save_to_disk(self):
+        """Grava a partida atual em disco. So chamado com uma partida
+        de verdade em andamento (ver chamadas em update()/run())."""
+        save_system.save_game(self)
+
+    def _trigger_game_over(self):
+        """Marca fim de partida e apaga o save em disco: a corrida
+        terminou, entao nao ha mais "continuar" essa partida especifica
+        (o proximo 'Continuar' nao deve reabrir um jogo ja perdido)."""
+        self.game_over = True
+        save_system.delete_save()
+        self.has_save_file = False
+
+    def _autosave_tick(self, dt):
+        """Autosave periodico enquanto a partida esta em andamento (nao
+        pausada, sem game over). Roda em Game.update; alem disso o jogo
+        tambem salva uma ultima vez ao fechar (ver run())."""
+        if self.state != "playing" or self.game_over:
+            return
+        self.autosave_timer -= dt
+        if self.autosave_timer <= 0:
+            self.autosave_timer = AUTOSAVE_INTERVAL
+            self.save_to_disk()
+            self.has_save_file = True
 
     # ------------------------------------------------------------------
     # JANELA / TELA CHEIA / ESCALA
@@ -667,6 +728,7 @@ class Game:
                     label = META_UPGRADE_DEFS[key]["label"]
                     cx = WIDTH // 2
                     self.add_floating_text(cx, TOP_HUD_HEIGHT + 40, f"{label} melhorado!", COL_GEM)
+                    save_system.save_meta(self)
                 return
         if not panel_rect.collidepoint(pos):
             self.meta_shop_open = False
@@ -800,12 +862,12 @@ class Game:
                     # chance) e HITKILL: mata na hora, indepenente de
                     # quantas vidas restam.
                     self.lives = 0
-                    self.game_over = True
+                    self._trigger_game_over()
                     continue
                 self.lives -= 1
                 if self.lives <= 0:
                     self.lives = 0
-                    self.game_over = True
+                    self._trigger_game_over()
             else:
                 # morreu por dano de torre
                 gold_gain = int(round(e.gold * self.meta.gold_mult() * self.map_path.gold_mult))
@@ -817,12 +879,14 @@ class Game:
                     if e.gems > 0:
                         self.gems += e.gems
                         self.add_floating_text(e.x, e.y - 22, f"+{e.gems} gema{'s' if e.gems != 1 else ''}", COL_GEM)
+                        save_system.save_meta(self)
                 if e.splits_into:
                     spawned_splits.extend(self._spawn_split(e))
 
         self.enemies = [e for e in self.enemies if e.alive] + spawned_splits
 
         self.update_floating_texts(dt)
+        self._autosave_tick(dt)
 
     # ------------------------------------------------------------------
     # DESENHO
@@ -1026,10 +1090,12 @@ class Game:
                                 elif not main_menu.help_panel_rect().collidepoint(pos):
                                     self.show_help = False
                             else:
-                                for rect, action in main_menu.button_rects():
+                                for rect, action in main_menu.button_rects(self):
                                     if rect.collidepoint(pos):
                                         if action == "play":
                                             self.state = "map_select"
+                                        elif action == "continue":
+                                            self.load_from_disk()
                                         elif action == "help":
                                             self.show_help = True
                                         elif action == "quit":
@@ -1056,6 +1122,16 @@ class Game:
 
             self.update(dt)
             self.draw()
+
+        # ultimo save antes de fechar de verdade: garante que fechar o
+        # jogo (janela, ESC, Alt+F4 etc.) nunca perde o progresso, mesmo
+        # que o ultimo autosave periodico ja tenha ficado alguns segundos
+        # pra tras (ou nao tenha rodado por causa da pausa).
+        if self.state == "playing" and not self.game_over:
+            self.save_to_disk()
+        # gemas/melhorias permanentes: ja sao salvas a cada mudanca (ver
+        # save_system.save_meta), isso aqui e so uma rede de seguranca.
+        save_system.save_meta(self)
 
         pygame.quit()
         sys.exit()
