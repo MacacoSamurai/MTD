@@ -29,6 +29,8 @@ import sys
 import tempfile
 from datetime import datetime
 
+from .config import DEFAULT_DIFFICULTY_ID
+
 SAVE_VERSION = 1
 SAVE_FILENAME = "save_game.json"
 META_FILENAME = "meta_progress.json"
@@ -162,6 +164,7 @@ def build_save_data(game):
         "version": SAVE_VERSION,
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "map_id": game.selected_map_id,
+        "difficulty_id": getattr(game, "selected_difficulty_id", DEFAULT_DIFFICULTY_ID),
         "gold": game.gold,
         "lives": game.lives,
         "total_kills": game.total_kills,
@@ -234,6 +237,7 @@ def apply_save_data(game, data):
     # atual (salva a cada mudanca, nao so a cada autosave da partida).
 
     wm = game.wave_mgr
+    wm.difficulty_id = getattr(game, "selected_difficulty_id", DEFAULT_DIFFICULTY_ID)
     wdata = data.get("wave") or {}
     wm.wave_num = wdata.get("wave_num", 0)
     wm.spawn_queue = list(wdata.get("spawn_queue", []))
@@ -257,8 +261,8 @@ def apply_save_data(game, data):
 
     game.enemies = []
     for edata in data.get("enemies", []):
-        hp_mult = _hp_mult_for_wave(edata.get("spawn_wave", 1), game.map_path)
-        speed_mult = _speed_mult_for_wave(edata.get("spawn_wave", 1))
+        hp_mult = _hp_mult_for_wave(edata.get("spawn_wave", 1), game.map_path, wm.difficulty_id)
+        speed_mult = _speed_mult_for_wave(edata.get("spawn_wave", 1), wm.difficulty_id)
         e = Enemy(edata["kind"], edata.get("spawn_wave", 1), hp_mult, speed_mult, game.map_path)
         e.spawn_wave = edata.get("spawn_wave", 1)
         e.max_hp = edata.get("max_hp", e.max_hp)
@@ -273,15 +277,20 @@ def apply_save_data(game, data):
     game.recalc_tower_cost()
 
 
-def _hp_mult_for_wave(n, map_path):
+def _hp_mult_for_wave(n, map_path, difficulty_id):
     # mesma formula de WaveManager.hp_mult, parametrizada pela onda de
     # nascimento do inimigo salvo (ver comentario em WaveManager)
+    from .config import DIFFICULTY_DEFS
+    diff_def = DIFFICULTY_DEFS.get(difficulty_id, DIFFICULTY_DEFS[DEFAULT_DIFFICULTY_ID])
     base = 1.0 + (n - 1) * 0.18
-    return base * map_path.hp_mult
+    return base * map_path.hp_mult * diff_def["enemy_power_mult"]
 
 
-def _speed_mult_for_wave(n):
-    return min(2.2, 1.0 + (n - 1) * 0.015)
+def _speed_mult_for_wave(n, difficulty_id):
+    from .config import DIFFICULTY_DEFS
+    diff_def = DIFFICULTY_DEFS.get(difficulty_id, DIFFICULTY_DEFS[DEFAULT_DIFFICULTY_ID])
+    base = min(2.2, 1.0 + (n - 1) * 0.015)
+    return base * diff_def["enemy_power_mult"]
 
 
 # ---------------------------------------------------------------------

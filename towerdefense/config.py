@@ -78,6 +78,54 @@ HEAVY_ENEMY_ARMOR = 8
 # SEM deteccao (ver "Visao Tatica", caminho Observador da sniper)
 EVASION_CHANCE = 0.35
 
+# ----------------------------------------------------------------------------
+# DIFICULDADES
+# Escolhida pelo jogador numa tela propria, depois do mapa (ver
+# ui/difficulty_menu.py). Multiplica por cima do que o MAPA ja aplica
+# (map_path.hp_mult/gold_mult) e da progressao normal por onda -- os
+# tres continuam funcionando exatamente como antes, a dificuldade so
+# adiciona mais um fator em cima.
+#   - gold_mult: multiplica todo ouro ganho ao abater inimigos
+#   - gem_mult: multiplica gemas ganhas de boss (recompensa de risco:
+#     dificuldades mais altas rendem mais gemas, o recurso permanente)
+#   - spawn_count_mult: multiplica a QUANTIDADE de inimigos por onda
+#   - enemy_power_mult: multiplica HP e velocidade dos inimigos
+# DEFAULT_DIFFICULTY_ID e o que toda partida nova comeca selecionada
+# na tela (nao pula a tela -- so define o card pre-marcado).
+# ----------------------------------------------------------------------------
+DIFFICULTY_DEFS = {
+    "pacifico": {
+        "label": "Pacifico", "desc": "Quase sem pressao: ideal para relaxar e testar torres.",
+        "gold_mult": 1.6, "gem_mult": 0.5, "spawn_count_mult": 0.5, "enemy_power_mult": 0.6,
+    },
+    "super_facil": {
+        "label": "Super Facil", "desc": "Bem tranquilo, com uma pressao minima.",
+        "gold_mult": 1.3, "gem_mult": 0.7, "spawn_count_mult": 0.7, "enemy_power_mult": 0.75,
+    },
+    "facil": {
+        "label": "Facil", "desc": "Um desafio leve para quem esta comecando.",
+        "gold_mult": 1.15, "gem_mult": 0.85, "spawn_count_mult": 0.85, "enemy_power_mult": 0.9,
+    },
+    "medio": {
+        "label": "Medio", "desc": "O equilibrio padrao do jogo.",
+        "gold_mult": 1.0, "gem_mult": 1.0, "spawn_count_mult": 1.0, "enemy_power_mult": 1.0,
+    },
+    "dificil": {
+        "label": "Dificil", "desc": "Mais inimigos e mais fortes: exige boas escolhas.",
+        "gold_mult": 0.85, "gem_mult": 1.25, "spawn_count_mult": 1.2, "enemy_power_mult": 1.2,
+    },
+    "muito_dificil": {
+        "label": "Muito Dificil", "desc": "Pressao pesada o jogo todo: poucas margens de erro.",
+        "gold_mult": 0.7, "gem_mult": 1.6, "spawn_count_mult": 1.4, "enemy_power_mult": 1.45,
+    },
+    "morte": {
+        "label": "Morte", "desc": "O modo mais brutal: cada onda testa o limite da sua defesa.",
+        "gold_mult": 0.5, "gem_mult": 2.2, "spawn_count_mult": 1.6, "enemy_power_mult": 1.8,
+    },
+}
+DIFFICULTY_ORDER = ["pacifico", "super_facil", "facil", "medio", "dificil", "muito_dificil", "morte"]
+DEFAULT_DIFFICULTY_ID = "medio"
+
 BOSS_WAVE_INTERVAL = 10  # a cada quantas ondas surge um boss
 BOSS_HP_SCALE_PER_CYCLE = 0.55  # bosses ficam mais fortes a cada ciclo de 10 ondas
 BOSS_GEMS_PER_CYCLE = 1  # gemas extras a cada ciclo de boss (alem da base)
