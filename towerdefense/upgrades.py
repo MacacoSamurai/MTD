@@ -48,8 +48,23 @@ projectile.py, via o payload do projetil).
 # CUSTOS
 # Custo base por tier (indice 0 = tier 1), multiplicado pelo fator do tipo
 # de torre. Tier 6 e deliberadamente caro: e a "super torre" da partida.
+#
+# BALANCEAMENTO (inspirado na curva de upgrades do Bloons TD 6: preco
+# ESTATICO por tier, sem depender do tempo de partida -- a dificuldade de
+# pagar vem de o preco crescer mais rapido que o ouro medio disponivel
+# naquele estagio, nao de o preco mudar com a onda). Calibrado por
+# simulacao do ouro ganho so matando (sem contar bonus de pular onda):
+#   - tier 1-3 (barato o bastante pra dar pra especializar uma torre cedo,
+#     mas caro o bastante pra NAO dar pra levar varias torres a tier 3 ao
+#     mesmo tempo nas primeiras ondas -- por volta da onda 20 da pra
+#     bancar ~6 torres em tier 3, nao 15+).
+#   - tier 4-5 exigem escolha: focar poucas torres fortes em vez de
+#     espalhar ouro por todo o mapa.
+#   - tier 6 fica com so ~1/3 do caixa medio disponivel la pela onda 20 e
+#     so fica confortavel perto da onda 30 -- e a "super torre" tardia,
+#     ainda por cima gated por gemas (TIER6_GEM_COST).
 # ----------------------------------------------------------------------------
-TIER_COSTS = [90, 220, 560, 1500, 4200, 15000]
+TIER_COSTS = [140, 320, 800, 2000, 5200, 16000]
 
 TYPE_COST_FACTOR = {
     "canhao": 1.00,
