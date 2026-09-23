@@ -14,7 +14,7 @@ from .config import (
     GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_COLS, GRID_ROWS, CELL_SIZE,
     CLICK_DRAG_THRESHOLD, COL_GOLD, COL_GEM, COL_RED, TOP_HUD_HEIGHT,
     TOWER_PANEL_WIDTH, TOWER_PANEL_SLIDE_SPEED, TOWER_PANEL_DOUBLE_CLICK_MS,
-    TIER6_GEM_COST, TOWER_TYPES, ENEMY_TYPES,
+    TIER6_GEM_COST, TOWER_TYPES, ENEMY_TYPES, BOSS_WAVE_INTERNAL,
     DIFFICULTY_DEFS, DEFAULT_DIFFICULTY_ID,
 )
 from .paths import MapPath
@@ -332,7 +332,7 @@ class Game:
         em TOWER_TYPES -- torres de elite como sniper/canhao pesado sao
         mais caras de comprar, nao so de evoluir) e os descontos
         permanentes comprados com gemas."""
-        raw = TOWER_BASE_COST + (self.wave_mgr.wave_num - 1) * 4
+        raw = TOWER_BASE_COST + (self.wave_mgr.wave_num - 1) * 6
         factor = TOWER_TYPES[ttype].get("buy_cost_factor", 1.0)
         return max(10, int(round(raw * factor * self.meta.tower_cost_mult())))
 
@@ -345,11 +345,28 @@ class Game:
         self.tower_cost = self.tower_cost_for("canhao")
 
     # ------------------------------------------------------------------
+    def max_skippable_wave(self):
+        """Onda-marco de boss mais proxima ainda nao superada. Pular pode
+        levar o jogador ATE essa onda (ela inclui o boss), mas nao alem
+        dela -- so libera pular mais ondas depois que ESSE boss for
+        derrotado (`total_bosses_killed` sobe e a proxima onda-marco
+        vira o limite)."""
+        return (self.total_bosses_killed + 1) * BOSS_WAVE_INTERVAL
+
+    def can_skip_wave(self):
+        """Falso quando a onda atual ja alcancou a onda-marco de boss
+        pendente: o jogador precisa matar aquele boss antes de poder
+        pular de novo (ver `max_skippable_wave`)."""
+        return self.wave_mgr.wave_num < self.max_skippable_wave()
+
+    # ------------------------------------------------------------------
     def skip_current_wave(self):
         """Pula para a proxima onda antes da hora. Da um bonus de ouro
         mas a proxima onda passa a vir junto com o que restar da atual
-        (mais inimigos na tela ao mesmo tempo = mais dificil)."""
-        if self.game_over or self.paused:
+        (mais inimigos na tela ao mesmo tempo = mais dificil). Bloqueado
+        se a onda atual ja e a onda-marco de um boss ainda vivo (ver
+        `can_skip_wave`)."""
+        if self.game_over or self.paused or not self.can_skip_wave():
             return
         bonus = SKIP_WAVE_BASE_BONUS + self.wave_mgr.wave_num * SKIP_WAVE_BONUS_PER_WAVE
         self.gold += bonus

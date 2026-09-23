@@ -152,16 +152,26 @@ def draw_hud(game, surf):
     surf.blit(cost_txt, crect)
 
     # botao de pular onda (da ouro extra, mas antecipa a proxima onda).
-    # Fica desabilitado (cinza, sem hover) enquanto o jogo esta pausado.
+    # Fica desabilitado (cinza, sem hover) enquanto o jogo esta pausado
+    # OU enquanto a onda atual ja e a onda-marco de um boss ainda vivo
+    # (ver Game.can_skip_wave/max_skippable_wave) -- so libera de novo
+    # depois que aquele boss for derrotado.
     bonus = SKIP_WAVE_BASE_BONUS + game.wave_mgr.wave_num * SKIP_WAVE_BONUS_PER_WAVE
+    boss_locked = not game.can_skip_wave()
+    disabled = game.paused or boss_locked
     btn_w, btn_h = 196, 34
     btn_rect = pygame.Rect(0, 0, btn_w, btn_h)
     btn_rect.topright = (gem_rect.left - 14, gem_rect.top)
-    game.skip_button_rect = None if game.paused else btn_rect
-    label = f"Pular onda (N)   +{bonus}g" if not game.paused else "Pular onda (N)"
-    txt_col = COL_GOLD if not game.paused else COL_TEXT_DIM
+    game.skip_button_rect = None if disabled else btn_rect
+    if game.paused:
+        label = "Pular onda (N)"
+    elif boss_locked:
+        label = "Pular onda (N)   Derrote o boss!"
+    else:
+        label = f"Pular onda (N)   +{bonus}g"
+    txt_col = COL_GOLD if not disabled else COL_TEXT_DIM
     btn_txt = font_small.render(label, True, txt_col)
-    theme.button(surf, btn_rect, game.mouse_pos, COL_GOLD, btn_txt, enabled=not game.paused, radius=9)
+    theme.button(surf, btn_rect, game.mouse_pos, COL_GOLD, btn_txt, enabled=not disabled, radius=9)
 
     # anuncio de habilidade tier 6 disparada pela IA: como o jogador nao
     # clica pra ativar, sem esse aviso o efeito parece acontecer "do nada"

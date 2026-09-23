@@ -50,8 +50,12 @@ TOWER_PANEL_DOUBLE_CLICK_MS = 400  # janela para o "2 cliques = auto-coloca"
 STARTING_GOLD = 220
 STARTING_LIVES = 20
 TOWER_BASE_COST = 60
-SKIP_WAVE_BASE_BONUS = 40   # ouro extra ganho ao pular a onda
-SKIP_WAVE_BONUS_PER_WAVE = 6  # cresce um pouco a cada onda
+# ouro extra ganho ao pular a onda -- e ouro "de graca" (sem precisar
+# matar nada), entao fica deliberadamente mais fraco que o ouro ganho
+# lutando a onda inteira, senao pular vira a fonte de renda otima e o
+# jogador nunca enfrenta a dificuldade real da onda que pulou.
+SKIP_WAVE_BASE_BONUS = 20
+SKIP_WAVE_BONUS_PER_WAVE = 2  # cresce bem mais devagar que antes (era 6, depois 3)
 # fracao do ouro INVESTIDO (compra + upgrades de caminho, incluindo o que
 # foi fundido) devolvida ao vender uma torre -- ver Tower.invested e
 # Game.sell_tower. Menor que 1 de proposito, senao comprar/vender vira
@@ -363,9 +367,15 @@ META_UPGRADE_DEFS = {
         "label": "Ganho de Ouro",
         "desc": "Aumenta todo ouro recebido ao abater inimigos.",
         "icon_color": (255, 210, 90),
-        "base_cost": 4, "cost_step": 3,
-        "effect_per_level": 0.10,  # +10% por nivel
-        "max_level": 15,
+        "base_cost": 4, "cost_step": 4,
+        # Era 0.10 x ate nivel 15 (+150% no teto). Isso e permanente entre
+        # partidas (ver save_system.save_meta), entao compunha com toda
+        # sessao futura -- depois de algumas partidas o ouro em jogo ja
+        # nascia inflado antes de qualquer decisao do jogador na partida
+        # atual. +84% no teto ainda vale a pena comprar, so nao dobra
+        # sozinho a economia inteira.
+        "effect_per_level": 0.07,  # +7% por nivel
+        "max_level": 12,
     },
     "start_level": {
         "label": "Nivel Inicial das Torres",
@@ -431,4 +441,4 @@ SECOND_CHANCE_DECAY = 0.90
 # gemas ja sao o limitador natural de quantos tier 6 voce consegue
 # bancar, entao a trava artificial deixou de fazer sentido.
 # ----------------------------------------------------------------------------
-TIER6_GEM_COST = 5
+TIER6_GEM_COST = 10
