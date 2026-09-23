@@ -14,7 +14,8 @@ from .config import (
     GRID_ORIGIN_X, GRID_ORIGIN_Y, GRID_COLS, GRID_ROWS, CELL_SIZE,
     CLICK_DRAG_THRESHOLD, COL_GOLD, COL_GEM, COL_RED, TOP_HUD_HEIGHT,
     TOWER_PANEL_WIDTH, TOWER_PANEL_SLIDE_SPEED, TOWER_PANEL_DOUBLE_CLICK_MS,
-    TIER6_GEM_COST, TOWER_TYPES, ENEMY_TYPES, BOSS_WAVE_INTERVAL,
+    TIER6_GEM_COST, TOWER_TYPES, ENEMY_TYPES, BOSS_WAVE_INTERNAL,
+    DIFFICULTY_DEFS, DEFAULT_DIFFICULTY_ID,
 )
 from .paths import MapPath
 from .maps import DEFAULT_MAP_ID
@@ -24,7 +25,7 @@ from .systems import WaveManager, MetaUpgrades, AbilityController, combat, vfx
 from . import upgrades as up
 from . import save_system
 from .fonts import get_font
-from .ui import hud, menus, board, map_menu, main_menu, tower_panel
+from .ui import hud, menus, board, map_menu, difficulty_menu, main_menu, tower_panel
 
 # Autosave a cada N segundos de jogo (alem do save imediato ao fechar o
 # jogo) -- ver Game.update / Game._autosave_tick.
@@ -74,11 +75,14 @@ class Game:
         self.mouse_pos = (0, 0)
         # estado geral do jogo: comeca no menu principal (tela de titulo).
         # "main_menu" -> tela de titulo | "map_select" -> escolhendo mapa
+        # | "difficulty_select" -> escolhendo dificuldade (apos o mapa)
         # | "playing" -> partida em curso
         self.state = "main_menu"
         self.show_help = False
         self.selected_map_id = DEFAULT_MAP_ID
         self.map_path = MapPath(self.selected_map_id)
+        self.selected_difficulty_id = DEFAULT_DIFFICULTY_ID
+        self._pending_map_id = self.selected_map_id
         self.reset()
         # save em disco: ver save_system.py (grava em C:\MTD\save_game.json).
         # `has_save_file` so controla se o menu principal mostra o botao
@@ -100,6 +104,7 @@ class Game:
             return
         self.selected_map_id = data.get("map_id", DEFAULT_MAP_ID)
         self.map_path = MapPath(self.selected_map_id)
+        self.selected_difficulty_id = data.get("difficulty_id", DEFAULT_DIFFICULTY_ID)
         self.reset()
         save_system.apply_save_data(self, data)
         self.state = "playing"
@@ -183,12 +188,29 @@ class Game:
         return (rel_x * WIDTH, rel_y * HEIGHT)
 
     def start_map(self, map_id):
-        """Chamado ao clicar num card do menu de mapas: define o mapa
-        escolhido, (re)constroi o caminho e comeca a partida."""
+        """Define o mapa escolhido, (re)constroi o caminho e comeca a
+        partida de verdade (com a dificuldade ja selecionada em
+        self.selected_difficulty_id). Mantido como o metodo que efetivamente
+        inicia o jogo -- chamado tanto pelo fluxo normal (apos escolher
+        mapa e dificuldade) quanto por quem queira pular direto pra uma
+        partida com a dificuldade padrao/atual (ex.: testes)."""
         self.selected_map_id = map_id
         self.map_path = MapPath(map_id)
         self.reset()
         self.state = "playing"
+
+    def choose_map(self, map_id):
+        """Chamado ao clicar num card do menu de mapas: guarda o mapa
+        escolhido e manda para a escolha de dificuldade (start_map so
+        roda de fato depois, em choose_difficulty)."""
+        self._pending_map_id = map_id
+        self.state = "difficulty_select"
+
+    def choose_difficulty(self, difficulty_id):
+        """Chamado ao clicar num card de dificuldade: fixa a dificuldade
+        escolhida e so ai inicia a partida no mapa pendente."""
+        self.selected_difficulty_id = difficulty_id
+        self.start_map(self._pending_map_id)
 
     def reset(self):
         self.gold = STARTING_GOLD + self.meta.bonus_starting_gold()
@@ -209,7 +231,7 @@ class Game:
         # DOMINIO ETERNO da partida anterior
         Enemy.global_amp = 0.0
         Enemy.global_slow = 1.0
-        self.wave_mgr = WaveManager(self.map_path)
+        self.wave_mgr = WaveManager(self.map_path, self.selected_difficulty_id)
         self.paused = False
         self.game_over = False
         self.dragging_tower = None
@@ -815,7 +837,7 @@ class Game:
 
     def update(self, dt):
         self.mouse_pos = self.window_to_canvas(pygame.mouse.get_pos())
-        if self.state in ("map_select", "main_menu"):
+        if self.state in ("map_select", "difficulty_select", "main_menu"):
             return
         self.hovered_cell = self.cell_from_pixel(*self.mouse_pos)
         self.update_tower_panel_slide(dt)
@@ -887,15 +909,17 @@ class Game:
                     self._trigger_game_over()
             else:
                 # morreu por dano de torre
-                gold_gain = int(round(e.gold * self.meta.gold_mult() * self.map_path.gold_mult))
+                diff_def = DIFFICULTY_DEFS.get(self.selected_difficulty_id, DIFFICULTY_DEFS[DEFAULT_DIFFICULTY_ID])
+                gold_gain = int(round(e.gold * self.meta.gold_mult() * self.map_path.gold_mult * diff_def["gold_mult"]))
                 self.gold += gold_gain
                 self.total_kills += 1
                 self.add_floating_text(e.x, e.y, f"+{gold_gain}g", COL_GOLD)
                 if e.is_boss:
                     self.total_bosses_killed += 1
                     if e.gems > 0:
-                        self.gems += e.gems
-                        self.add_floating_text(e.x, e.y - 22, f"+{e.gems} gema{'s' if e.gems != 1 else ''}", COL_GEM)
+                        gems_gain = max(1, round(e.gems * diff_def["gem_mult"]))
+                        self.gems += gems_gain
+                        self.add_floating_text(e.x, e.y - 22, f"+{gems_gain} gema{'s' if gems_gain != 1 else ''}", COL_GEM)
                         save_system.save_meta(self)
                 if e.splits_into:
                     spawned_splits.extend(self._spawn_split(e))
@@ -920,6 +944,11 @@ class Game:
 
         if self.state == "map_select":
             map_menu.draw_map_menu(self, self.canvas)
+            self._present()
+            return
+
+        if self.state == "difficulty_select":
+            difficulty_menu.draw_difficulty_menu(self, self.canvas)
             self._present()
             return
 
@@ -1061,6 +1090,8 @@ class Game:
                         self.show_help = False  # ESC fecha o "Como Jogar" antes de sair
                     elif event.key == pygame.K_ESCAPE and self.state == "map_select":
                         self.state = "main_menu"  # ESC volta ao menu principal
+                    elif event.key == pygame.K_ESCAPE and self.state == "difficulty_select":
+                        self.state = "map_select"  # ESC volta a escolha de mapa
                     elif event.key == pygame.K_ESCAPE and self.selected_shop_type is not None:
                         self.selected_shop_type = None  # cancela o modo de colocacao antes de sair
                     elif event.key == pygame.K_ESCAPE:
@@ -1069,6 +1100,8 @@ class Game:
                         pass  # sem atalhos extras; usar os botoes do menu
                     elif self.state == "map_select":
                         pass  # nenhum atalho de teclado no menu de mapas
+                    elif self.state == "difficulty_select":
+                        pass  # nenhum atalho de teclado no menu de dificuldade
                     elif event.key == pygame.K_p and not self.game_over:
                         self.paused = not self.paused
                     elif event.key == pygame.K_SPACE and not self.game_over:
@@ -1121,7 +1154,12 @@ class Game:
                         elif self.state == "map_select":
                             for rect, map_id in map_menu.map_card_rects():
                                 if rect.collidepoint(pos):
-                                    self.start_map(map_id)
+                                    self.choose_map(map_id)
+                                    break
+                        elif self.state == "difficulty_select":
+                            for rect, diff_id in difficulty_menu.difficulty_card_rects():
+                                if rect.collidepoint(pos):
+                                    self.choose_difficulty(diff_id)
                                     break
                         elif self.meta_shop_open:
                             self.handle_meta_shop_click(pos)
@@ -1134,7 +1172,7 @@ class Game:
                         else:
                             self.handle_click_down(pos)
                 elif event.type == pygame.MOUSEBUTTONUP:
-                    if event.button == 1 and self.state not in ("map_select", "main_menu"):
+                    if event.button == 1 and self.state not in ("map_select", "difficulty_select", "main_menu"):
                         self.handle_click_up(self.window_to_canvas(event.pos))
 
             self.update(dt)

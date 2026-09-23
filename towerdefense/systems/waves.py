@@ -3,13 +3,16 @@ periodicos e a logica de "pular onda"."""
 
 import random
 
-from ..config import ENEMY_TYPES, BOSS_WAVE_INTERVAL
+from ..config import ENEMY_TYPES, BOSS_WAVE_INTERVAL, DIFFICULTY_DEFS, DEFAULT_DIFFICULTY_ID
 from ..entities.enemy import Enemy
 
 
 class WaveManager:
-    def __init__(self, map_path):
+    def __init__(self, map_path, difficulty_id=DEFAULT_DIFFICULTY_ID):
         self.map_path = map_path
+        # guardado como id (nao os multiplicadores soltos) para o save
+        # conseguir persistir/restaurar sem duplicar os numeros do config.
+        self.difficulty_id = difficulty_id
         self.wave_num = 0
         self.spawn_queue = []  # fila de inimigos NORMAIS a spawnar (nunca contem boss)
         self.spawn_timer = 0.0
@@ -32,12 +35,16 @@ class WaveManager:
         # empilhada — bem depois da SUA propria onda.
         self.pending_bosses = []
 
+    def _difficulty_def(self):
+        return DIFFICULTY_DEFS.get(self.difficulty_id, DIFFICULTY_DEFS[DEFAULT_DIFFICULTY_ID])
+
     def hp_mult(self):
         base = 1.0 + (self.wave_num - 1) * 0.18
-        return base * self.map_path.hp_mult
+        return base * self.map_path.hp_mult * self._difficulty_def()["enemy_power_mult"]
 
     def speed_mult(self):
-        return min(2.2, 1.0 + (self.wave_num - 1) * 0.015)
+        base = min(2.2, 1.0 + (self.wave_num - 1) * 0.015)
+        return base * self._difficulty_def()["enemy_power_mult"]
 
     def wave_has_boss(self, n):
         return n % BOSS_WAVE_INTERVAL == 0 and n >= ENEMY_TYPES["boss"]["min_wave"]
@@ -49,8 +56,8 @@ class WaveManager:
         (ver `pending_bosses`/`wave_has_boss`)."""
         available = [k for k, v in ENEMY_TYPES.items()
                      if v["min_wave"] <= n and not v.get("is_boss")]
-        count = 6 + n * 2
-        count = min(count, 60)
+        count = (6 + n * 2) * self._difficulty_def()["spawn_count_mult"]
+        count = max(1, min(round(count), 60))
         queue = []
         for _ in range(count):
             weights = []
